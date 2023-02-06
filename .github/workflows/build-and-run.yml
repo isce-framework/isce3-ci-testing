@@ -28,7 +28,7 @@ jobs:
           environment-file: environment.yml
       - name: Configure CMAKE
         run: |
-          if [ "RUNNER_OS" == "macOS" ]; then
+          if [ "$RUNNER_OS" == "macOS" ]; then
             export DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
           fi
           cmake \
