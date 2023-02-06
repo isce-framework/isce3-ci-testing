@@ -26,10 +26,10 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
-        name: Build Project
+      - name: Build Project
         run: |
           cmake --build build --target install
           cd build
-        name: Test Project
+      - name: Test Project
         run: |
           ctest
