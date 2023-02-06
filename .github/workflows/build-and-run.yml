@@ -15,7 +15,8 @@ jobs:
           python-version: 3.9
       - name: Update Conda Base Environment
         run: |
-          $CONDA/bin/conda env update --file environment.yml --name base
+          brew install ninja
+          $CONDA/bin/conda env update -v --file environment.yml --name base
       - name: Configure CMAKE
         run: |
           cmake \
