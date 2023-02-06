@@ -16,6 +16,7 @@ jobs:
       - name: Update Conda Base Environment
         run: |
           brew install ninja
+          rew install fftw
           $CONDA/bin/conda env update -v --file environment.yml --name base
       - name: Configure CMAKE
         run: |
@@ -24,7 +25,6 @@ jobs:
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
-            -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
       - name: Build Project
