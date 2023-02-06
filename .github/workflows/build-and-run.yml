@@ -16,7 +16,7 @@ jobs:
       - name: Update Conda Base Environment
         run: |
           brew install ninja
-          rew install fftw
+          brew install fftw
           $CONDA/bin/conda env update -v --file environment.yml --name base
       - name: Configure CMAKE
         run: |
