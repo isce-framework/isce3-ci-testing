@@ -3,8 +3,11 @@ name: Build-And-Run Tests
 on: [push]
 
 jobs:
-  try_mac:
-    runs-on: macos-latest
+  build_and_test:
+    strategy:
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash -l {0}
@@ -19,13 +22,15 @@ jobs:
       - name: Setup Environment
         uses: conda-incubator/setup-miniconda@v2
         with:
-          mamba-version: "*"
           channels: conda-forge,nodefaults
           auto-activate-base: false
           activate-environment: isce3-ci-sandbox
           environment-file: environment.yml
       - name: Configure CMAKE
         run: |
+          if [ "RUNNER_OS" == "macOS" ]; then
+            export DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
+          fi
           cmake \
             -B build \
             -G Ninja \
