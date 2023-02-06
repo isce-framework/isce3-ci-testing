@@ -1,0 +1,26 @@
+name: isce3-ci-sandbox
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - backoff
+  - cmake>=3.18
+  - cxx-compiler
+  - eigen>=3.3
+  - fftw>=3.3
+  - gdal>=3.0
+  - gmock>=1.10
+  - gtest>=1.10
+  - h5py>=3.0
+  - hdf5>=1.10.2,<1.13
+  - ninja
+  - numpy>=1.20
+  - pyaps3>=0.3
+  - pybind11>=2.5
+  - pyre>=1.11.2
+  - pytest
+  - python>=3.7
+  - ruamel.yaml
+  - scipy!=1.10.0
+  - shapely
+  - yamale

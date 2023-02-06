@@ -1,0 +1,35 @@
+name: Build-And-Run Tests
+
+on: [push]
+
+jobs:
+  try_mac:
+    runs-on: macos-latest
+
+    steps:
+      - name: Github Repo Checkout
+        uses: actions/checkout@v2
+      - name: Set Up Python v3.9
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.9
+      - name: Update Conda Base Environment
+        run: |
+          $CONDA/bin/conda env update --file environment.yml --name base
+      - name: Configure CMAKE
+        run: |
+          cmake \
+            -B build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
+            -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
+            -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
+            .
+        name: Build Project
+        run: |
+          cmake --build build --target install
+          cd build
+        name: Test Project
+        run: |
+          ctest
