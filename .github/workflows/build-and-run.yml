@@ -5,6 +5,9 @@ on: [push]
 jobs:
   try_mac:
     runs-on: macos-latest
+    defaults:
+      run:
+        shell: bash -l {0}
 
     steps:
       - name: Github Repo Checkout
@@ -13,11 +16,14 @@ jobs:
         uses: actions/setup-python@v2
         with:
           python-version: 3.9
-      - name: Update Conda Base Environment
-        run: |
-          brew install ninja
-          brew install fftw
-          $CONDA/bin/conda env update -v --file environment.yml --name base
+      - name: Setup Environment
+        run: conda-incubator/setup-miniconda@v2
+        with:
+          mamba-version: "*"
+          channels: conda-forge,nodefaults
+          auto-activate-base: false
+          activate-environment: isce3-ci-sandbox
+          environment-file: environment.yml
       - name: Configure CMAKE
         run: |
           cmake \
@@ -27,12 +33,10 @@ jobs:
             -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
-        shell: bash -l {0} 
       - name: Build Project
         run: |
           cmake --build build --target install
           cd build
-        shell: bash -l {0} 
       - name: Test Project
         run: |
           ctest
