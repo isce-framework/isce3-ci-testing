@@ -27,10 +27,12 @@ jobs:
             -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
+        shell: bash -l {0} 
       - name: Build Project
         run: |
           cmake --build build --target install
           cd build
+        shell: bash -l {0} 
       - name: Test Project
         run: |
           ctest
