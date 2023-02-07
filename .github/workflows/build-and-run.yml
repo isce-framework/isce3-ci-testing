@@ -4,6 +4,9 @@ on: [push]
 
 jobs:
   build_and_test:
+    env:
+      ALL_EXCLUDE: stage_dem
+
     defaults:
       run:
         shell: bash -l {0}
@@ -11,13 +14,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        all-exclude: [stage_dem]
         os: [macos-latest, ubuntu-latest]
         include:
         - os: macos-latest
-          ctest_exclude: -E ".*(${{ matrix.all-exclude }}|raster|unwrap.snaphu)"
+          ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
         - os: ubuntu-latest
-          ctest_exclude: -E ".*(${{ matrix.all-exclude }})"
+          ctest_exclude: -E ".*($ALL_EXCLUDE)"
     
     runs-on: ${{ matrix.os }}
 
