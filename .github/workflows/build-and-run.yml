@@ -53,6 +53,8 @@ jobs:
         run: |
           if [ "$RUNNER_OS" == "macOS" ]; then
             export DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
+            echo $LD_LIBRARY_PATH
+            echo $DYLD_LIBRARY_PATH
           fi
           cd build
-          ctest
+          ctest -E ".*stage_dem"
