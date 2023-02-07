@@ -4,18 +4,22 @@ on: [push]
 
 jobs:
   build_and_test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, ubuntu-latest]
-        include:
-        - os: macos-latest
-          ctest_exclude: |
-            |raster|snaphu
-    runs-on: ${{ matrix.os }}
     defaults:
       run:
         shell: bash -l {0}
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        all-exclude: stage_dem
+        os: [macos-latest, ubuntu-latest]
+        include:
+        - os: macos-latest
+          ctest_exclude: -E ".*(${{ matrix.all-exclude }}|raster|unwrap.snaphu)"
+        - os: ubuntu-latest
+          ctest_exclude: -E ".*(${{ matrix.all-exclude }})"
+    
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Github Repo Checkout
@@ -58,4 +62,4 @@ jobs:
           cmake --build build --target install --parallel
       - name: Test Project
         run: |
-          ctest --test-dir build -E "(.*stage_dem${{ matrix.ctest_exclude }})" --output-on-failure
+          ctest --test-dir build --output-on-failure ${{ matrix.ctest_exclude }}
