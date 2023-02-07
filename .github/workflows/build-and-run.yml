@@ -29,9 +29,12 @@ jobs:
           environment-file: environment.yml
       - name: Configure CMAKE
         run: |
+          env config vars set PYTHONPATH=$CONDA/envs/isce3-ci-sandbox/bin/python
+          env config vars set LD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
           if [ "$RUNNER_OS" == "macOS" ]; then
-            export DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
+            env config vars set DYLD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
             export REPO_PREFIX=/Users/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
+
           elif [ "$RUNNER_OS" == "Linux" ]; then
             export REPO_PREFIX=/home/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
           else
@@ -48,13 +51,11 @@ jobs:
             .
       - name: Build Project
         run: |
-          cmake --build build --target install
+          cmake --build build --target install --parallel
       - name: Test Project
         run: |
           if [ "$RUNNER_OS" == "macOS" ]; then
-            export DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
             echo $LD_LIBRARY_PATH
             echo $DYLD_LIBRARY_PATH
           fi
-          cd build
-          ctest -E ".*stage_dem"
+          ctest --test-dir build -E ".*stage_dem"
