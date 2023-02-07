@@ -58,4 +58,4 @@ jobs:
             echo $LD_LIBRARY_PATH
             echo $DYLD_LIBRARY_PATH
           fi
-          ctest --test-dir build -E ".*stage_dem"
+          ctest --test-dir build -E "(.*stage_dem)|(.*cxx.*)" --output-on-failure
