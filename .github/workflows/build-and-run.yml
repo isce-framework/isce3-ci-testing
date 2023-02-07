@@ -16,7 +16,7 @@ jobs:
     steps:
       - name: Github Repo Checkout
         uses: actions/checkout@v2
-      - name: Set Up Python v3.9
+      - name: Setup Python v3.9
         uses: actions/setup-python@v2
         with:
           python-version: 3.9
@@ -27,26 +27,26 @@ jobs:
           auto-activate-base: false
           activate-environment: isce3-ci-sandbox
           environment-file: environment.yml
-      - name: Configure CMAKE
+      - name: Environment Variables Preset
         run: |
           conda env config vars set PYTHONPATH=$CONDA/envs/isce3-ci-sandbox/bin/python
-          conda env config vars set LD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
-          if [ "$RUNNER_OS" == "macOS" ]; then
-            conda env config vars set DYLD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
-            export REPO_PREFIX=/Users/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
-
-          elif [ "$RUNNER_OS" == "Linux" ]; then
-            export REPO_PREFIX=/home/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
+          if test -d "${GITHUB_WORKSPACE}/lib64"; then
+            export LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/lib64:$CONDA/envs/isce3-ci-sandbox/bin/ld
           else
-            echo "$RUNNER_OS not supported"
-            exit 1
+            export LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/lib:$CONDA/envs/isce3-ci-sandbox/bin/ld
           fi
+          conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            conda env config vars set DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
+          fi
+      - name: Configure CMAKE
+        run: |
           cmake \
             -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
-            -DCMAKE_INSTALL_PREFIX=$REPO_PREFIX/install/prefix \
+            -DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/install/prefix \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
       - name: Build Project
