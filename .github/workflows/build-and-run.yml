@@ -29,10 +29,10 @@ jobs:
           environment-file: environment.yml
       - name: Configure CMAKE
         run: |
-          env config vars set PYTHONPATH=$CONDA/envs/isce3-ci-sandbox/bin/python
-          env config vars set LD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
+          conda env config vars set PYTHONPATH=$CONDA/envs/isce3-ci-sandbox/bin/python
+          conda env config vars set LD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
           if [ "$RUNNER_OS" == "macOS" ]; then
-            env config vars set DYLD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
+            conda env config vars set DYLD_LIBRARY_PATH=$CONDA/envs/isce3-ci-sandbox/bin/ld
             export REPO_PREFIX=/Users/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
 
           elif [ "$RUNNER_OS" == "Linux" ]; then
