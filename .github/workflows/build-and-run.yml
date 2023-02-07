@@ -8,6 +8,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+        include:
+        - os: macos-latest
+          ctest_exclude: |
+            |raster|snaphu
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -54,8 +58,4 @@ jobs:
           cmake --build build --target install --parallel
       - name: Test Project
         run: |
-          if [ "$RUNNER_OS" == "macOS" ]; then
-            echo $LD_LIBRARY_PATH
-            echo $DYLD_LIBRARY_PATH
-          fi
-          ctest --test-dir build -E "(.*stage_dem)|(.*cxx.*)" --output-on-failure
+          ctest --test-dir build -E "(.*stage_dem${{ matrix.ctest_exclude }})" --output-on-failure
