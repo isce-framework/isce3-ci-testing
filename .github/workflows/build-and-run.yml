@@ -30,12 +30,19 @@ jobs:
         run: |
           if [ "$RUNNER_OS" == "macOS" ]; then
             export DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
+            export REPO_PREFIX=/Users/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            export REPO_PREFIX=/home/runner/work/isce3-ci-sandbox/isce3-ci-sandbox
+          else
+            echo "$RUNNER_OS not supported"
+            exit 1
           fi
           cmake \
             -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
+            -DCMAKE_INSTALL_PREFIX=$REPO_PREFIX/install/prefix \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
       - name: Build Project
