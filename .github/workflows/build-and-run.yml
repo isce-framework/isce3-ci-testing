@@ -41,7 +41,7 @@ jobs:
           - label: Latest
             extra-specs: ""
         include:
-          os: 
+        - os: 
             - runner: macos-latest
               label: macOS
               ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
