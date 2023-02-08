@@ -8,7 +8,8 @@ concurrency:
 
 jobs:
   build_and_test:
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os.label }} • ${{matrix.deps.label }}
+    runs-on: ${{ matrix.os.runner }}
 
     env:
       ALL_EXCLUDE: stage_dem
@@ -20,28 +21,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        os: 
+          - label: Linux
+            runner: ubuntu-latest
+        ctest_exclude: -E ".*($ALL_EXCLUDE)"
+        deps:
+          - label: Minimum
+            extra-specs: |
+              cmake=3.18
+              eigen=3.3
+              fftw=3.3
+              gdal=3.0
+              gmock=1.10
+              gtest=1.10
+              h5py=3.0
+              hdf5=1.10
+              numpy=1.20
+              pyaps3=0.3
+              pybind11=2.5
+              pyre=1.11.2
+              python=3.7
+          - label: Latest
+            extra-specs: ""
         include:
-        - os: macos-latest
-          ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
-        - os: ubuntu-latest
-          ctest_exclude: -E ".*($ALL_EXCLUDE)"
-        - os: ubuntu-latest
-          ctest_exclude: -E ".*($ALL_EXCLUDE)"
-          extra-specs: |
-            cmake=3.18
-            eigen=3.3
-            fftw=3.3
-            gdal=3.0
-            gmock=1.10
-            gtest=1.10
-            h5py=3.0
-            hdf5=1.10
-            numpy=1.20
-            pyaps3=0.3
-            pybind11=2.5
-            pyre=1.11.2
-            python=3.7
+          - os: 
+            - runner: macos-latest
+              label: macOS
+            deps:
+            - extra-specs: ""
+              label: Latest
+            ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
     steps:
       - name: Github Repo Checkout
         uses: actions/checkout@v2
