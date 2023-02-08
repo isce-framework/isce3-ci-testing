@@ -19,25 +19,38 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
+        ctest_exclude: [ -E ".*($ALL_EXCLUDE)" ]
         include:
         - os: macos-latest
           ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
+          name: macOS
         - os: ubuntu-latest
-          ctest_exclude: -E ".*($ALL_EXCLUDE)"
-    runs-on: ${{ matrix.os }}
-
+          name: Ubuntu
+        - os: ubuntu-latest
+          name: Ubuntu Minimum Requirements
+          extra-specs: |
+            cmake=3.18
+            eigen=3.3
+            fftw=3.3
+            gdal=3.0
+            gmock=1.10
+            gtest=1.10
+            h5py=3.0
+            hdf5=1.10
+            numpy=1.20
+            pyaps3=0.3
+            pybind11=2.5
+            pyre=1.11.2
+            python=3.7
     steps:
       - name: Github Repo Checkout
         uses: actions/checkout@v2
-#      - name: Setup Python v3.9
-#        uses: actions/setup-python@v2
-#        with:
-#          python-version: 3.9
       - name: Setup Environment
         uses: mamba-org/provision-with-micromamba@main
         with:
           environment-file: environment.yml
           environment-name: isce3-ci-sandbox
+          extra-specs: ${{ matrix.extra-specs }}
       - name: Environment Variables Preset
         run: |
           export ISCE3_PREFIX=${GITHUB_WORKSPACE}/install
