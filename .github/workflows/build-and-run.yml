@@ -21,15 +21,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-latest, ubuntu-latest]
-        ctest_exclude: [ -E ".*($ALL_EXCLUDE)" ]
         include:
         - os: macos-latest
           ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
-          name: macOS
         - os: ubuntu-latest
-          name: Ubuntu
+          ctest_exclude: -E ".*($ALL_EXCLUDE)"
         - os: ubuntu-latest
-          name: Ubuntu Minimum Requirements
+          ctest_exclude: -E ".*($ALL_EXCLUDE)"
           extra-specs: |
             cmake=3.18
             eigen=3.3
