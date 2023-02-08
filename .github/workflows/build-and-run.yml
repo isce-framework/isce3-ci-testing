@@ -8,7 +8,7 @@ concurrency:
 
 jobs:
   build_and_test:
-    name: ${{ matrix.os.label }} • ${{matrix.deps.label }}
+    name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
     runs-on: ${{ matrix.os.runner }}
 
     env:
@@ -24,7 +24,7 @@ jobs:
         os: 
           - label: Linux
             runner: ubuntu-latest
-        ctest_exclude: -E ".*($ALL_EXCLUDE)"
+            ctest_exclude: -E ".*($ALL_EXCLUDE)"
         deps:
           - label: Minimum
             extra-specs: |
@@ -47,10 +47,10 @@ jobs:
           - os: 
             - runner: macos-latest
               label: macOS
+              ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
             deps:
             - extra-specs: ""
               label: Latest
-            ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
     steps:
       - name: Github Repo Checkout
         uses: actions/checkout@v2
@@ -91,4 +91,4 @@ jobs:
           cmake --build build --target install --parallel
       - name: Test Project
         run: |
-          ctest --test-dir build --output-on-failure ${{ matrix.ctest_exclude }}
+          ctest --test-dir build --output-on-failure ${{ matrix.os.ctest_exclude }}
