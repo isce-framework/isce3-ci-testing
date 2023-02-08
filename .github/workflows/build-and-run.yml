@@ -8,9 +8,6 @@ concurrency:
 
 jobs:
   build_and_test:
-    name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
-    runs-on: ${{ matrix.os.runner }}
-
     env:
       ALL_EXCLUDE: stage_dem
 
@@ -51,6 +48,8 @@ jobs:
             deps:
               - extra-specs: ""
                 label: Latest
+    name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
+    runs-on: ${{ matrix.os.runner }}
     steps:
       - name: Github Repo Checkout
         uses: actions/checkout@v2
@@ -59,7 +58,7 @@ jobs:
         with:
           environment-file: environment.yml
           environment-name: isce3-ci-sandbox
-          extra-specs: ${{ matrix.extra-specs }}
+          extra-specs: ${{ matrix.deps.extra-specs }}
       - name: Environment Variables Preset
         run: |
           export ISCE3_PREFIX=${GITHUB_WORKSPACE}/install
