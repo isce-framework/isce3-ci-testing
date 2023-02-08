@@ -45,12 +45,12 @@ jobs:
             extra-specs: ""
         include:
           - os: 
-            - runner: macos-latest
-              label: macOS
-              ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
+              - runner: macos-latest
+                label: macOS
+                ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
             deps:
-            - extra-specs: ""
-              label: Latest
+              - extra-specs: ""
+                label: Latest
     steps:
       - name: Github Repo Checkout
         uses: actions/checkout@v2
