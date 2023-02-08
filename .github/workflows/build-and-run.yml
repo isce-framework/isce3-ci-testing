@@ -34,12 +34,10 @@ jobs:
 #        with:
 #          python-version: 3.9
       - name: Setup Environment
-        uses: conda-incubator/setup-miniconda@v2
+        uses: mamba-org/provision-with-micromamba@main
         with:
-          mamba-version: "*"
-          auto-activate-base: false
-          activate-environment: isce3-ci-sandbox
           environment-file: environment.yml
+          environment-name: isce3-ci-sandbox
       - name: Environment Variables Preset
         run: |
           export ISCE3_PREFIX=${GITHUB_WORKSPACE}/install
