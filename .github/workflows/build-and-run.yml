@@ -19,9 +19,9 @@ jobs:
       fail-fast: false
       matrix:
         os: 
-          - label: Linux
-            runner: ubuntu-latest
-            ctest_exclude: -E ".*($ALL_EXCLUDE)"
+          label: Linux
+          runner: ubuntu-latest
+          ctest_exclude: -E ".*($ALL_EXCLUDE)"
         deps:
           - label: Minimum
             extra-specs: |
@@ -42,12 +42,12 @@ jobs:
             extra-specs: ""
         include:
           - os: 
-              - runner: macos-latest
-                label: macOS
-                ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
+              runner: macos-latest
+              label: macOS
+              ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
             deps:
-              - extra-specs: ""
-                label: Latest
+              extra-specs: ""
+              label: Latest
     name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
     runs-on: ${{ matrix.os.runner }}
     steps:
