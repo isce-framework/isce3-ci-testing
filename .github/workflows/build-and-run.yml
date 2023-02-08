@@ -8,6 +8,8 @@ concurrency:
 
 jobs:
   build_and_test:
+    runs-on: ${{ matrix.os }}
+
     env:
       ALL_EXCLUDE: stage_dem
 
