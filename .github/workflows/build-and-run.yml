@@ -2,6 +2,10 @@ name: Build-And-Run Tests
 
 on: [push]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref }}
+  cancel-in-progress: true
+
 jobs:
   build_and_test:
     env:
@@ -20,7 +24,6 @@ jobs:
           ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
         - os: ubuntu-latest
           ctest_exclude: -E ".*($ALL_EXCLUDE)"
-    
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -39,11 +42,13 @@ jobs:
           environment-file: environment.yml
       - name: Environment Variables Preset
         run: |
-          conda env config vars set PYTHONPATH=$CONDA/envs/isce3-ci-sandbox/bin/python
-          if test -d "${GITHUB_WORKSPACE}/install/prefix/lib64"; then
-            export LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/install/prefix/lib64:$CONDA/envs/isce3-ci-sandbox/bin/ld
+          export ISCE3_PREFIX=${GITHUB_WORKSPACE}/install
+          conda env config vars set ISCE3_PREFIX=$ISCE3_PREFIX
+          conda env config vars set PYTHONPATH=$PYTHONPATH:$ISCE3_PREFIX/packages
+          if test -d "$ISCE3_PREFIX/lib64"; then
+            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib64:$CONDA_PREFIX/bin/ld
           else
-            export LD_LIBRARY_PATH=${GITHUB_WORKSPACE}/install/prefix/lib:$CONDA/envs/isce3-ci-sandbox/bin/ld
+            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib:$CONDA_PREFIX/bin/ld
           fi
           conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH
           if [ "$RUNNER_OS" == "macOS" ]; then
@@ -55,11 +60,13 @@ jobs:
             -B build \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_FLAGS="-fdiagnostics-color=auto" \
-            -DCMAKE_INSTALL_PREFIX=${GITHUB_WORKSPACE}/install/prefix \
+            -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
       - name: Build Project
+        run: |
+          cmake --build build --parallel
+      - name: Install Project
         run: |
           cmake --build build --target install --parallel
       - name: Test Project
