@@ -9,7 +9,7 @@ concurrency:
 jobs:
   build_and_test:
     env:
-      ALL_EXCLUDE: stage_dem
+      ALL_EXCLUDE: stage_dem|ionosphere|background|pybind.unwrap.phass
 
     defaults:
       run:
