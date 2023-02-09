@@ -43,7 +43,7 @@ dependencies:
   #####################
   # PYTHON: Important
   # Current ver: 3.11.1
-  - python=3.7
+  - python=3.8
   #####################
   - ruamel.yaml
   - scipy!=1.10.0
