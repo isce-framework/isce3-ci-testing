@@ -26,7 +26,7 @@ jobs:
             deps:
               label: Minimum
               env-file: env/minimum-reqs.yml
-              extra-specs: ""
+              extra-specs: "gsl"
           - os: 
               label: Linux
               runner: ubuntu-latest
