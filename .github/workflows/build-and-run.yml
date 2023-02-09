@@ -32,12 +32,11 @@ jobs:
                 gdal=3.0
                 gmock=1.10
                 gtest=1.10
-                h5py=3.0
-                hdf5=1.10
+                h5py=3.1
+                hdf5=1.10.6
                 numpy=1.20
                 pyaps3=0.3
                 pybind11=2.5
-                pyre=1.11.2
                 python=3.7
           - os: 
               label: Linux
@@ -56,14 +55,26 @@ jobs:
     name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
     runs-on: ${{ matrix.os.runner }}
     steps:
+      # Typical github repo checkout step
       - name: Github Repo Checkout
         uses: actions/checkout@v2
+
+      # Prints the variables for this run to simplify debugging
+      - name: Print Run Variables
+        run: |
+          echo Runner OS: ${{ matrix.os.runner }}
+          echo ctest exclude command: ${{ matrix.os.ctest_excludes }}
+          echo Depenencies: ${{ matrix.deps.extra-specs }}
+
+      # Set the conda environment up using Mamba and the dependencies for this run
       - name: Setup Environment
         uses: mamba-org/provision-with-micromamba@main
         with:
           environment-file: environment.yml
           environment-name: isce3-ci-sandbox
           extra-specs: ${{ matrix.deps.extra-specs }}
+
+      # Preset environment variables in the conda environment for later steps
       - name: Environment Variables Preset
         run: |
           export ISCE3_PREFIX=${GITHUB_WORKSPACE}/install
@@ -78,7 +89,9 @@ jobs:
           if [ "$RUNNER_OS" == "macOS" ]; then
             conda env config vars set DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
           fi
-      - name: Configure CMAKE
+      
+      # Get cmake command configured with relevant build information
+      - name: Configure cmake
         run: |
           cmake \
             -B build \
@@ -87,12 +100,18 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
+      
+      # Build the project
       - name: Build Project
         run: |
           cmake --build build --parallel
+      
+      # Install the project
       - name: Install Project
         run: |
           cmake --build build --target install --parallel
+
+      # Run ctest on the project with the intended test exclusions for this run
       - name: Test Project
         run: |
           ctest --test-dir build --output-on-failure ${{ matrix.os.ctest_exclude }}
