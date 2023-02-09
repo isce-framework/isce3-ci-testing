@@ -105,4 +105,5 @@ jobs:
       # Run ctest on the project with the intended test exclusions for this run
       - name: Test Project
         run: |
-          ctest --test-dir build --output-on-failure ${{ matrix.os.ctest_exclude }}
+          cd build
+          ctest --output-on-failure ${{ matrix.os.ctest_exclude }}
