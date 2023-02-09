@@ -25,31 +25,22 @@ jobs:
               ctest_exclude: -E ".*($ALL_EXCLUDE)"
             deps:
               label: Minimum
-              extra-specs: |
-                cmake=3.18
-                eigen=3.3
-                fftw=3.3
-                gdal=3.0
-                gmock=1.10
-                gtest=1.10
-                h5py=3.1
-                hdf5=1.10.6
-                numpy=1.20
-                pyaps3=0.3
-                pybind11=2.5
-                python=3.7
+              env-file: env/minimum-reqs.yml
+              extra-specs: ""
           - os: 
               label: Linux
               runner: ubuntu-latest
               ctest_exclude: -E ".*($ALL_EXCLUDE)"
             deps:
               label: Latest
+              env-file: env/environment.yml
               extra-specs: ""
           - os: 
               runner: macos-latest
               label: macOS
               ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
             deps:
+              env-file: env/environment.yml
               extra-specs: ""
               label: Latest
     name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
@@ -70,7 +61,7 @@ jobs:
       - name: Setup Environment
         uses: mamba-org/provision-with-micromamba@main
         with:
-          environment-file: environment.yml
+          environment-file: {{ matrix.deps.env-file }}
           environment-name: isce3-ci-sandbox
           extra-specs: ${{ matrix.deps.extra-specs }}
 
