@@ -18,8 +18,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - label: Linux
+            runner: ubuntu-latest
+            ctest_exclude: -E ".*($ALL_EXCLUDE)"
+          - runner: macos-latest
+            label: macOS
+            ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
+        deps:
+          - label: Latest
+            env-file: env/environment.yml
+            extra-specs: ""
+        build-type: [ Release, Debug ]
         include:
-          - os: 
+          - os:
               label: Linux
               runner: ubuntu-latest
               ctest_exclude: -E ".*($ALL_EXCLUDE)"
@@ -27,23 +39,9 @@ jobs:
               label: Minimum
               env-file: env/minimum-reqs.yml
               extra-specs: "gsl"
-          - os: 
-              label: Linux
-              runner: ubuntu-latest
-              ctest_exclude: -E ".*($ALL_EXCLUDE)"
-            deps:
-              label: Latest
-              env-file: env/environment.yml
-              extra-specs: ""
-          - os: 
-              runner: macos-latest
-              label: macOS
-              ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
-            deps:
-              env-file: env/environment.yml
-              extra-specs: ""
-              label: Latest
-    name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
+            build-type: Release
+
+    name: Build And Test - ${{ matrix.os.label }} ${{ matrix.deps.label }} ${{ matrix.build-type }}
     runs-on: ${{ matrix.os.runner }}
     steps:
       # Typical github repo checkout step
@@ -54,7 +52,9 @@ jobs:
       - name: Print Run Variables
         run: |
           echo Runner OS: ${{ matrix.os.runner }}
-          echo ctest exclude command: ${{ matrix.os.ctest_excludes }}
+          echo Environment: ${{ matrix.deps.env-file }}
+          echo Build Type: ${{ matrix.build-type }}
+          echo ctest exclude command: ${{ matrix.os.ctest_exclude }}
           echo Depenencies: ${{ matrix.deps.extra-specs }}
 
       # Set the conda environment up using Mamba and the dependencies for this run
@@ -87,7 +87,7 @@ jobs:
           cmake \
             -B build \
             -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
             -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
