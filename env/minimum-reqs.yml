@@ -17,7 +17,7 @@ dependencies:
   #####################
   # GDAL: Important
   # Current ver: 3.6.2
-  - gdal=3.0
+  - gdal=3.1
   #####################
   # gmock: Current ver = 1.13
   - gmock=1.10
