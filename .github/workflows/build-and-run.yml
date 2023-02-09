@@ -61,7 +61,7 @@ jobs:
       - name: Setup Environment
         uses: mamba-org/provision-with-micromamba@main
         with:
-          environment-file: {{ matrix.deps.env-file }}
+          environment-file: ${{ matrix.deps.env-file }}
           environment-name: isce3-ci-sandbox
           extra-specs: ${{ matrix.deps.extra-specs }}
 
