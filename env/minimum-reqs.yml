@@ -1,50 +1,25 @@
-name: isce3-ci-sandbox
+name: isce3
 channels:
   - conda-forge
   - nodefaults
 dependencies:
   - backoff
-  # cmake: Current ver = 3.25
   - cmake=3.18
   - cxx-compiler
-  #####################
-  # EIGEN: Important
-  # Current ver: 3.4.0
   - eigen=3.3
-  #####################
-  # FFTW: Current ver = 3.3
   - fftw=3.3
-  #####################
-  # GDAL: Important
-  # Current ver: 3.6.2
   - gdal=3.0
-  #####################
-  # gmock: Current ver = 1.13
   - gmock=1.10
-  # gtest: Current ver = 1.13
   - gtest=1.10
-  # h5py: Current ver = 3.8
   - h5py=3.1
-  #####################
-  # HDF5: Important
-  # Current ver: 1.8.23
   - hdf5=1.10.6
-  #####################
   - ninja
-  # numpy: Current ver = 1.24
   - numpy=1.20
-  # pyaps3: Current ver = 0.3
   - pyaps3=0.3
-  # pybind11: Current ver = 2.10
   - pybind11=2.5
-  # pyre: Current ver = 1.11.2
-  #- pyre=1.11.2 #!!!!!!!!!!
+  # pyre not included in this build
   - pytest
-  #####################
-  # PYTHON: Important
-  # Current ver: 3.11.1
-  - python=3.7
-  #####################
+  - python=3.8
   - ruamel.yaml
   - scipy!=1.10.0
   - shapely

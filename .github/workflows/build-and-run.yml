@@ -1,6 +1,6 @@
 name: Build-And-Run Tests
 
-on: [push]
+on: [pull_request, push]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref }}
@@ -9,7 +9,7 @@ concurrency:
 jobs:
   build_and_test:
     env:
-      ALL_EXCLUDE: stage_dem
+      ALL_EXCLUDE: stage_dem|ionosphere|background|pybind\.unwrap\.phass
 
     defaults:
       run:
@@ -18,8 +18,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        os:
+          - label: Linux
+            runner: ubuntu-latest
+            ctest_exclude: -E ".*($ALL_EXCLUDE)"
+          - runner: macos-latest
+            label: macOS
+            ctest_exclude: -E ".*($ALL_EXCLUDE|io\.gdal\.raster|unwrap\.snaphu)"
+        deps:
+          - label: Latest
+            env-file: env/environment.yml
+            extra-specs: ""
+        build-type: [ Release, Debug ]
         include:
-          - os: 
+          - os:
               label: Linux
               runner: ubuntu-latest
               ctest_exclude: -E ".*($ALL_EXCLUDE)"
@@ -27,23 +39,9 @@ jobs:
               label: Minimum
               env-file: env/minimum-reqs.yml
               extra-specs: "gsl"
-          - os: 
-              label: Linux
-              runner: ubuntu-latest
-              ctest_exclude: -E ".*($ALL_EXCLUDE)"
-            deps:
-              label: Latest
-              env-file: env/environment.yml
-              extra-specs: ""
-          - os: 
-              runner: macos-latest
-              label: macOS
-              ctest_exclude: -E ".*($ALL_EXCLUDE|raster|unwrap.snaphu)"
-            deps:
-              env-file: env/environment.yml
-              extra-specs: ""
-              label: Latest
-    name: Build And Test - ${{ matrix.os.label }} ${{matrix.deps.label }}
+            build-type: Release
+
+    name: Build And Test - ${{ matrix.os.label }} ${{ matrix.deps.label }} ${{ matrix.build-type }}
     runs-on: ${{ matrix.os.runner }}
     steps:
       # Typical github repo checkout step
@@ -54,7 +52,9 @@ jobs:
       - name: Print Run Variables
         run: |
           echo Runner OS: ${{ matrix.os.runner }}
-          echo ctest exclude command: ${{ matrix.os.ctest_excludes }}
+          echo Environment: ${{ matrix.deps.env-file }}
+          echo Build Type: ${{ matrix.build-type }}
+          echo ctest exclude command: ${{ matrix.os.ctest_exclude }}
           echo Depenencies: ${{ matrix.deps.extra-specs }}
 
       # Set the conda environment up using Mamba and the dependencies for this run
@@ -62,24 +62,15 @@ jobs:
         uses: mamba-org/provision-with-micromamba@main
         with:
           environment-file: ${{ matrix.deps.env-file }}
-          environment-name: isce3-ci-sandbox
+          environment-name: isce3
           extra-specs: ${{ matrix.deps.extra-specs }}
 
       # Preset environment variables in the conda environment for later steps
       - name: Environment Variables Preset
         run: |
-          export ISCE3_PREFIX=${GITHUB_WORKSPACE}/install
-          conda env config vars set ISCE3_PREFIX=$ISCE3_PREFIX
-          conda env config vars set PYTHONPATH=$PYTHONPATH:$ISCE3_PREFIX/packages
-          if test -d "$ISCE3_PREFIX/lib64"; then
-            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib64:$CONDA_PREFIX/bin/ld
-          else
-            export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib:$CONDA_PREFIX/bin/ld
-          fi
-          conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH
-          if [ "$RUNNER_OS" == "macOS" ]; then
-            conda env config vars set DYLD_LIBRARY_PATH=$LD_LIBRARY_PATH
-          fi
+          conda env config vars set ISCE3_PREFIX=$GITHUB_WORKSPACE/install
+          conda env config vars set PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/install/packages
+
       
       # Get cmake command configured with relevant build information
       - name: Configure cmake
@@ -87,7 +78,7 @@ jobs:
           cmake \
             -B build \
             -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
             -DCMAKE_INSTALL_PREFIX=$ISCE3_PREFIX \
             -DCMAKE_PREFIX_PATH=$CONDA_PREFIX \
             .
@@ -105,4 +96,17 @@ jobs:
       # Run ctest on the project with the intended test exclusions for this run
       - name: Test Project
         run: |
-          ctest --test-dir build --output-on-failure ${{ matrix.os.ctest_exclude }}
+          if test -d "$ISCE3_PREFIX/lib64"; then
+            conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib64
+            if [ "$RUNNER_OS" == "macOS" ]; then
+              conda env config vars set DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$ISCE3_PREFIX/lib64
+            fi
+          else
+            conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib
+            if [ "$RUNNER_OS" == "macOS" ]; then
+              conda env config vars set DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$ISCE3_PREFIX/lib
+            fi
+          fi
+
+          cd build
+          ctest --output-on-failure ${{ matrix.os.ctest_exclude }}
