@@ -9,7 +9,7 @@ concurrency:
 jobs:
   build_and_test:
     env:
-      ALL_EXCLUDE: stage_dem|ionosphere|background|pybind\.unwrap\.phass
+      ALL_EXCLUDE: stage_dem|pybind\.unwrap\.phass
 
 
     defaults:
@@ -25,20 +25,20 @@ jobs:
             ctest_exclude: -E ".*($ALL_EXCLUDE)"
           - runner: macos-latest
             label: macOS
-            ctest_exclude: -E ".*($ALL_EXCLUDE|io\.gdal\.raster|unwrap\.snaphu)"
+            ctest_exclude: -E ".*($ALL_EXCLUDE|io\.gdal\.raster|unwrap\.snaphu|background)"
         deps:
           - label: Latest
-            env-file: env/environment.yml
+            env-file: .github/conda_envs/environment.yml
             extra-specs: ""
         build-type: [ Release, Debug ]
         include:
           - os:
               label: Linux
               runner: ubuntu-latest
-              ctest_exclude: -E ".*($ALL_EXCLUDE)"
+              ctest_exclude: -E ".*($ALL_EXCLUDE|ionosphere)"
             deps:
               label: Minimum
-              env-file: env/minimum-reqs.yml
+              env-file: .github/conda_envs/minimum-reqs.yml
               extra-specs: "gsl"
             build-type: Release
 
