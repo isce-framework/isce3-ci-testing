@@ -93,9 +93,9 @@ jobs:
       - name: Install Project
         run: |
           cmake --build build --target install --parallel
-
-      # Run ctest on the project with the intended test exclusions for this run
-      - name: Test Project
+      
+      # Set the LD_LIBRARY_PATH and DYLD_LIBRARY_PATH variables
+      - name: Set Link Library Environment Variables
         run: |
           if test -d "$ISCE3_PREFIX/lib64"; then
             conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib64
@@ -109,5 +109,8 @@ jobs:
             fi
           fi
 
+      # Run ctest on the project with the intended test exclusions for this run
+      - name: Test Project
+        run: |
           cd build
           ctest --output-on-failure ${{ matrix.os.ctest_exclude }}
