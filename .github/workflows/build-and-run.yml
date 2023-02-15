@@ -10,7 +10,8 @@ jobs:
   build_and_test:
     env:
       ALL_EXCLUDE: stage_dem|pybind\.unwrap\.phass
-
+      # stage_dem requires AWS permissions to access the S3 bucket containing the DEM data.
+      # pybind.unwrap.phass occasionally segfaults on GHA runners.
 
     defaults:
       run:
@@ -26,6 +27,9 @@ jobs:
           - runner: macos-latest
             label: macOS
             ctest_exclude: -E ".*($ALL_EXCLUDE|io\.gdal\.raster|unwrap\.snaphu|background)"
+            # io.gdal.raster and unwrap.snaphu tests fail due to known unresolved issues
+            # with GDAL memory mapping on macOS.
+            # background reader/writer test sometimes fails on macOS due to slow runtimes.
         deps:
           - label: Latest
             env-file: .github/conda_envs/environment.yml
@@ -36,6 +40,7 @@ jobs:
               label: Linux
               runner: ubuntu-latest
               ctest_exclude: -E ".*($ALL_EXCLUDE|ionosphere)"
+              # ionosphere tests fail on Linux Minimum due to apparent issues with older GDAL versions
             deps:
               label: Minimum
               env-file: .github/conda_envs/minimum-reqs.yml
@@ -71,7 +76,6 @@ jobs:
         run: |
           conda env config vars set ISCE3_PREFIX=$GITHUB_WORKSPACE/install
           conda env config vars set PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/install/packages
-
       
       # Get cmake command configured with relevant build information
       - name: Configure cmake
@@ -96,17 +100,15 @@ jobs:
       
       # Set the LD_LIBRARY_PATH and DYLD_LIBRARY_PATH variables
       - name: Set Link Library Environment Variables
+        # Append to DYLD_LIBRARY_PATH on macOS or to LD_LIBRARY_PATH on Linux.
+        # Depending on the Linux flavor, the install dir name could be 'lib64' or 'lib'.
         run: |
-          if test -d "$ISCE3_PREFIX/lib64"; then
+          if [ "$RUNNER_OS" == "macOS" ]; then
+            conda env config vars set DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$ISCE3_PREFIX/lib
+          elif test -d "$ISCE3_PREFIX/lib64"; then
             conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib64
-            if [ "$RUNNER_OS" == "macOS" ]; then
-              conda env config vars set DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$ISCE3_PREFIX/lib64
-            fi
           else
             conda env config vars set LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ISCE3_PREFIX/lib
-            if [ "$RUNNER_OS" == "macOS" ]; then
-              conda env config vars set DYLD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$ISCE3_PREFIX/lib
-            fi
           fi
 
       # Run ctest on the project with the intended test exclusions for this run
