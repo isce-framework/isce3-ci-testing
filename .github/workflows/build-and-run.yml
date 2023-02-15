@@ -99,7 +99,7 @@ jobs:
           cmake --build build --target install --parallel
       
       # Set the LD_LIBRARY_PATH and DYLD_LIBRARY_PATH variables
-      - name: Set Link Library Environment Variables
+      - name: Set Link Library Environment Variable
         # Append to DYLD_LIBRARY_PATH on macOS or to LD_LIBRARY_PATH on Linux.
         # Depending on the Linux flavor, the install dir name could be 'lib64' or 'lib'.
         run: |
