@@ -47,7 +47,7 @@ jobs:
     steps:
       # Typical github repo checkout step
       - name: Github Repo Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       # Prints the variables for this run to simplify debugging
       - name: Print Run Variables
