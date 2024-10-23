@@ -20,7 +20,7 @@ dependencies:
   - pyaps3=0.3
   - pybind11=2.5
   # TODO exclude pyre so it is built from source
-  - pyre=1.12.5
+  - pyre
   - pysolid
   - pytest
   - python=3.9
