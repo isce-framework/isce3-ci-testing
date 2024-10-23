@@ -4,7 +4,7 @@ channels:
   - nodefaults
 dependencies:
   - backoff
-  - cmake>=3.18
+  - cmake>=3.19
   - cxx-compiler
   - eigen>=3.3
   - fftw>=3.3
