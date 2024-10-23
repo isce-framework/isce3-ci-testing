@@ -72,11 +72,11 @@ jobs:
           create-args: >-
             ${{ matrix.deps.extra-specs }}
 
-      # Fix conda command on macOS
+      # Fix missing conda command on macOS
       - name: macOS conda command fixup
         if: runner.os == 'macOS'
         run: |
-          echo ". $MAMBA_ROOT_PREFIX/etc/profile.d/conda.sh" >> ~/.bash_profile
+          micromamba install conda
 
       # Preset environment variables in the conda environment for later steps
       - name: Environment Variables Preset
