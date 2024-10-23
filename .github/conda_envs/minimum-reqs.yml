@@ -18,6 +18,7 @@ dependencies:
   - pyaps3=0.3
   - pybind11=2.5
   # pyre not included in this build
+  - pysolid
   - pytest
   - python=3.8
   - ruamel.yaml
