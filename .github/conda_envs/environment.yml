@@ -20,7 +20,7 @@ dependencies:
   - pyre>=1.11.2
   - pysolid
   - pytest
-  - python>=3.7
+  - python>=3.9
   - ruamel.yaml
   - scipy!=1.10.0
   - shapely

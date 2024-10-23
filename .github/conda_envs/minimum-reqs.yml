@@ -20,7 +20,7 @@ dependencies:
   # pyre not included in this build
   - pysolid
   - pytest
-  - python=3.8
+  - python=3.9
   - ruamel.yaml
   - scipy!=1.10.0
   - shapely
