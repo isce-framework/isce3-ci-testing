@@ -16,6 +16,7 @@ dependencies:
   - hdf5=1.10.6
   - ninja
   - numpy=1.20
+  - pandas
   - pyaps3=0.3
   - pybind11=2.5
   # pyre not included in this build

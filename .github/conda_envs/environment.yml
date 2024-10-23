@@ -15,6 +15,7 @@ dependencies:
   - hdf5>=1.10.2
   - ninja
   - numpy>=1.20,<2
+  - pandas
   - pyaps3>=0.3
   - pybind11>=2.5
   - pyre>=1.11.2
