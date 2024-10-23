@@ -65,11 +65,12 @@ jobs:
 
       # Set the conda environment up using Mamba and the dependencies for this run
       - name: Setup Environment
-        uses: mamba-org/provision-with-micromamba@main
+        uses: mamba-org/setup-micromamba@v1
         with:
           environment-file: ${{ matrix.deps.env-file }}
           environment-name: isce3
-          extra-specs: ${{ matrix.deps.extra-specs }}
+          create-args: >-
+            ${{ matrix.deps.extra-specs }}
 
       # Preset environment variables in the conda environment for later steps
       - name: Environment Variables Preset
