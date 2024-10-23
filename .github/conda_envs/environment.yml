@@ -19,7 +19,7 @@ dependencies:
   - pandas
   - pyaps3>=0.3
   - pybind11>=2.5
-  - pyre>=1.11.2
+  - pyre>=1.12.5
   - pysolid
   - pytest
   - python>=3.9
