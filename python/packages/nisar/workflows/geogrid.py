@@ -1,15 +1,17 @@
 '''
 collection of functions for determing and setting geogrid
 '''
+import copy
 
 import numpy as np
-
-import journal
-
 from osgeo import osr
+import journal
 
 import isce3
 from nisar.products.readers import SLC
+from nisar.workflows.stage_dem import margin_km_to_deg
+
+METADATA_CUBES_MARGIN_IN_PIXELS = 5
 
 
 def _grid_size(stop, start, sz):
@@ -20,32 +22,49 @@ def _grid_size(stop, start, sz):
     if None in [stop, start, sz]:
         return np.nan
 
-    return int(np.ceil(np.abs((stop-start)/sz)))
+    return int(np.round(np.abs((stop-start)/sz)))
 
 
 def create(cfg, workflow_name=None, frequency_group=None,
            frequency=None, geocode_dict=None,
-           default_spacing_x=None, default_spacing_y=None):
+           default_spacing_x=None, default_spacing_y=None,
+           is_geo_wrapped_igram=False,
+           flag_metadata_cubes=False,
+           geogrid_ref=None):
     '''
-    - frequency_group is the name of the sub-group that
-    holds the fields x_posting and y_posting, which is usually
-    the frequency groups "A" or "B". If these fields
-    are direct member of the output_posting group, e.g
-    for radar_grid_cubes, the frequency_group should be left
-     as None.
-    - frequency is the frequency name, if not provided, it will be
-    the same as the frequency_group.
-    - geocode_dict overwrites the default geocode_dict from
-    processing.geocode
-    - default_spacing_x is default pixel spacing in the X-direction
-    - default_spacing_y is default pixel spacing in the Y-direction
+    Create ISCE3 geogrid object based on runconfig parameters
 
-    For production we only fix epsgcode and snap value and will
-    rely on the rslc product metadta to compute the bounding box of the geocoded products
-    there is a place holder in SLC product for compute Bounding box
-    when that method is populated we should be able to simply say
-    bbox = self.slc_obj.computeBoundingBox(epsg=state.epsg)
-    for now let's rely on the run config input
+    Parameters
+    ----------
+    frequency_group: str, optional
+        The name of the sub-group that holds the fields x_posting and
+        y_posting, which is usually
+        the frequency groups "A" or "B". If these fields
+        are direct member of the output_posting group, e.g
+        for radar_grid_cubes, the frequency_group should be left
+        as None.
+    frequency: str, optional
+        The frequency name, if not provided, it will be
+        the same as the frequency_group.
+    geocode_dict: dict, optional
+        Dictionary to overwrite the default dictionary representing
+        the runconfig group processing.geocode
+    default_spacing_x: scalar, optional
+        Default pixel spacing in the X-direction
+    default_spacing_y: scalar, optional
+        Default pixel spacing in the Y-direction
+    is_geo_wrapped_igram: bool, optional
+        Flag indicating if the geogrid is associated with a
+        wrapped interferogram
+    flag_metadata_cubes: bool, optional
+        Flag indicating if the geogrid corresponds to meta data cubes
+    geogrid_ref: isce.product.GeoGridParameters, optional
+        Geogrid to be used as reference if the runconfig does
+        not include geogrid parameter
+
+    Returns
+    geogrid: isce.product.GeoGridParameters
+        Geogrid object
     '''
     error_channel = journal.error('geogrid.create')
 
@@ -54,7 +73,7 @@ def create(cfg, workflow_name=None, frequency_group=None,
         geocode_dict = cfg['processing']['geocode']
 
     if workflow_name == 'insar':
-       input_hdf5 = cfg['input_file_group']['reference_rslc_file']
+        input_hdf5 = cfg['input_file_group']['reference_rslc_file']
     else:
         input_hdf5 = cfg['input_file_group']['input_file_path']
     dem_file = cfg['dynamic_ancillary_file_group']['dem_file']
@@ -68,12 +87,24 @@ def create(cfg, workflow_name=None, frequency_group=None,
     if frequency is None:
         frequency = frequency_group
 
+    # if geocode the wrapped inteferogram
+    geo_wrapped_igram = (workflow_name == 'insar') and is_geo_wrapped_igram
+
+    output_posting_group = geocode_dict['output_posting']\
+            if not geo_wrapped_igram else geocode_dict['wrapped_interferogram']
+
     if frequency_group is None:
-        spacing_x = geocode_dict['output_posting']['x_posting']
-        spacing_y = geocode_dict['output_posting']['y_posting']
+        spacing_x = output_posting_group['x_posting']
+        spacing_y = output_posting_group['y_posting']
     else:
-        spacing_x = geocode_dict['output_posting'][frequency_group]['x_posting']
-        spacing_y = geocode_dict['output_posting'][frequency_group]['y_posting']
+        if geo_wrapped_igram:
+            spacing_x = output_posting_group['output_posting']\
+                    [frequency_group]['x_posting']
+            spacing_y = output_posting_group['output_posting']\
+                    [frequency_group]['y_posting']
+        else:
+            spacing_x = output_posting_group[frequency_group]['x_posting']
+            spacing_y = output_posting_group[frequency_group]['y_posting']
 
     end_x = geocode_dict['bottom_right']['x_abs']
     end_y = geocode_dict['bottom_right']['y_abs']
@@ -94,6 +125,9 @@ def create(cfg, workflow_name=None, frequency_group=None,
     # copy Y spacing from default Y spacing (if applicable)
     if spacing_y is None and default_spacing_y is not None:
         spacing_y = default_spacing_y
+
+    epsg_spatial_ref = osr.SpatialReference()
+    epsg_spatial_ref.ImportFromEPSG(epsg)
 
     if spacing_x is None or spacing_y is None:
         dem_raster = isce3.io.Raster(dem_file)
@@ -124,9 +158,6 @@ def create(cfg, workflow_name=None, frequency_group=None,
                     raise ValueError(err_str)
 
         else:
-            epsg_spatial_ref = osr.SpatialReference()
-            epsg_spatial_ref.ImportFromEPSG(epsg)
-
             # Set pixel spacing in degrees (lat/lon)
             if epsg_spatial_ref.IsGeographic():
                 if spacing_x is None:
@@ -149,11 +180,53 @@ def create(cfg, workflow_name=None, frequency_group=None,
     # init geogrid
     if None in [start_x, start_y, epsg, end_x, end_y]:
 
-        # extract other geogrid params from radar grid and orbit constructed bounding box
-        geogrid = isce3.product.bbox_to_geogrid(slc.getRadarGrid(frequency),
-                                                slc.getOrbit(),
-                                                isce3.core.LUT2d(),
-                                                spacing_x, spacing_y, epsg)
+        if geogrid_ref is not None:
+            # get grid dimensions for given `spacing_x` and `spacing_y`
+            width = _grid_size(geogrid_ref.end_x,
+                               geogrid_ref.start_x,
+                               spacing_x)
+            length = _grid_size(geogrid_ref.end_y,
+                                geogrid_ref.start_y,
+                                spacing_y)
+
+            # create geogrid based on geogrid_ref with newly computed
+            # dimensons
+            geogrid = isce3.product.GeoGridParameters(
+                start_x=geogrid_ref.start_x,
+                start_y=geogrid_ref.start_y,
+                spacing_x=spacing_x,
+                spacing_y=spacing_y,
+                width=width,
+                length=length,
+                epsg=geogrid_ref.epsg)
+
+            if flag_metadata_cubes:
+                geogrid.start_x -= METADATA_CUBES_MARGIN_IN_PIXELS * spacing_x
+                geogrid.start_y += (METADATA_CUBES_MARGIN_IN_PIXELS *
+                                    abs(spacing_y))
+                # Starting coordinates will be snapped to the grid.
+                # So, add one extra pixel at the end to make sure that the end
+                # coordinates will include the margin defined by
+                # METADATA_CUBES_MARGIN_IN_PIXELS
+                geogrid.width += 2 * METADATA_CUBES_MARGIN_IN_PIXELS + 1
+                geogrid.length += 2 * METADATA_CUBES_MARGIN_IN_PIXELS + 1
+        else:
+            if flag_metadata_cubes:
+                margin = METADATA_CUBES_MARGIN_IN_PIXELS * max([spacing_x,
+                                                                spacing_y])
+                if epsg_spatial_ref.IsGeographic():
+                    margin_in_deg = margin
+                else:
+                    margin_in_deg = margin_km_to_deg(margin / 1000.0)
+            else:
+                margin_in_deg = 0
+
+            geogrid = isce3.product.bbox_to_geogrid(
+                slc.getRadarGrid(frequency),
+                slc.getOrbit(),
+                isce3.core.LUT2d(),
+                spacing_x, spacing_y, epsg,
+                margin=margin_in_deg)
 
         # restore runconfig start_x (if provided)
         if start_x is not None:
@@ -181,7 +254,7 @@ def create(cfg, workflow_name=None, frequency_group=None,
 
     else:
         width = _grid_size(end_x, start_x, spacing_x)
-        length = _grid_size(end_y, start_y, -1.0*spacing_y)
+        length = _grid_size(end_y, start_y, spacing_y)
 
         # build from probably good user values
         geogrid = isce3.product.GeoGridParameters(start_x, start_y,
@@ -200,6 +273,11 @@ def create(cfg, workflow_name=None, frequency_group=None,
     # snap all the things
     x_snap = geocode_dict['x_snap']
     y_snap = geocode_dict['y_snap']
+
+    # Change the snap if it is to geocode the wrapped interferogram
+    if geo_wrapped_igram:
+        x_snap = output_posting_group['x_snap']
+        y_snap = output_posting_group['y_snap']
 
     if x_snap is not None or y_snap is not None:
         # check snap values before proceeding

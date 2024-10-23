@@ -1,8 +1,3 @@
-//-*- coding: utf-8 -*-
-//
-// Author: Bryan V. Riel, Joshua Cohen
-// Copyright: 2017-2018
-
 #include "gpuTopo.h"
 #include <cmath>
 
@@ -114,6 +109,12 @@ void setOutputTopoLayers(const Vec3& targetLLH,
         heading += 360;
     }
     layers.hdg(index, heading);
+
+    // Compute and assign ground to satellite unit vector east and north components
+    const Vec3 groundToSat = -satToGround;
+    const Vec3 enuGroundToSat = xyz2enu.dot(groundToSat).normalized();
+    layers.groundToSatEast(index, enuGroundToSat[0]);
+    layers.groundToSatNorth(index, enuGroundToSat[1]);
 
     // Project output coordinates to DEM coordinates
     Vec3 input_coords_llh;
@@ -273,9 +274,6 @@ runGPUTopo(const isce3::core::Ellipsoid & ellipsoid,
     checkCudaErrors(cudaMalloc(&projOutput_d, sizeof(isce3::cuda::core::ProjectionBase **)));
     createProjection<<<1, 1>>>(projOutput_d, epsgOut);
 
-    // DEM interpolator initializes its projection and interpolator
-    gpu_demInterp.initProjInterp();
-
     // Allocate integer for storing convergence results
     unsigned int * totalconv_d;
     checkCudaErrors(cudaMalloc(&totalconv_d, sizeof(unsigned int)));
@@ -305,12 +303,9 @@ runGPUTopo(const isce3::core::Ellipsoid & ellipsoid,
                                cudaMemcpyDeviceToHost));
 
     // Delete projection pointer on device
-    gpu_demInterp.finalizeProjInterp();
     deleteProjection<<<1, 1>>>(projOutput_d);
 
     // Free projection pointer and convergence count
     checkCudaErrors(cudaFree(totalconv_d));
     checkCudaErrors(cudaFree(projOutput_d));
 }
-
-// end of file

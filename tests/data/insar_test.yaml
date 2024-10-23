@@ -13,7 +13,9 @@ runconfig:
         dynamic_ancillary_file_group:
             # REQUIRED - Use the provided DEM as input
             dem_file: @ISCETEST@/winnipeg_dem.tif
-
+            orbit_files:
+                reference_orbit_file:
+                secondary_orbit_file:
         product_path_group:
             # REQUIRED - Directory where PGE will place results. Irrelevant to SAS.
             product_path: '.'
@@ -85,6 +87,17 @@ runconfig:
                         x_posting:
                         y_posting:
 
+                wrapped_interferogram:
+                    interp_method: BILINEAR
+                    x_snap:
+                    y_snap:
+                    output_posting:
+                        A:
+                            x_posting: 30
+                            y_posting: 30
+                        B:
+                            x_posting:
+                            y_posting:
                 # OPTIONAL - Can control with absolute values or with snap values
                 top_left:
                     # OPTIONAL - Set top-left y in same units as output EPSG
@@ -111,7 +124,8 @@ runconfig:
                 write_layover_shadow: True
 
             coarse_resample:
-                lines_per_tile: 100
+                lines_per_tile: 1000
+                columns_per_tile: 1000
 
             dense_offsets:
                 enabled: True
@@ -124,6 +138,7 @@ runconfig:
                 correlation_surface_zoom: 8
                 correlation_surface_oversampling_factor: 32
                 correlation_surface_oversampling_method: 'sinc'
+                deramping_method: 'magnitude'
 
             rubbersheet:
                 threshold: 0.01
@@ -145,3 +160,7 @@ runconfig:
 
             phase_unwrap:
                 crossmul_path: @ISCETEST@/winnipeg.h5
+
+        output:
+            compression_enabled: False
+            chunk_size: [ 16, 16 ]

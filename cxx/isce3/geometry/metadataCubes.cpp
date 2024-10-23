@@ -25,6 +25,12 @@ static isce3::core::Matrix<T>
 getNanArray(isce3::io::Raster* raster,
             const isce3::product::GeoGridParameters& geogrid)
 {
+    /*
+    This function allocates memory for an array (`data_array`)
+    using `geogrid` dimensions if an output raster (`raster`)
+    is provided, i.e, if `raster`
+    is not a null pointer `nullptr`.
+    */
     isce3::core::Matrix<T> data_array;
     if (raster != nullptr) {
         data_array.resize(geogrid.length(), geogrid.width());
@@ -38,10 +44,15 @@ static isce3::core::Matrix<T>
 getNanArrayRadarGrid(isce3::io::Raster* raster,
               const isce3::product::RadarGridParameters& radar_grid)
 {
+    /*
+    This function allocates memory for an array (`data_array`)
+    using `radar_grid` dimensions if an output raster (`raster`)
+    is provided, i.e, if `raster` is not a null pointer `nullptr`.
+    */
     isce3::core::Matrix<T> data_array;
-        if (raster != nullptr) {            
-            data_array.resize(radar_grid.length(), radar_grid.width());
-        }
+    if (raster != nullptr) {            
+        data_array.resize(radar_grid.length(), radar_grid.width());
+    }
     data_array.fill(std::numeric_limits<T>::quiet_NaN());
     return data_array;
 }
@@ -60,7 +71,7 @@ static void writeArray(isce3::io::Raster* raster,
     }
 }
 
-inline void writeVectorDerivedCubes(const int array_pos_i,
+void writeVectorDerivedCubes(const int array_pos_i,
         const int array_pos_j, const double native_azimuth_time,
         const isce3::core::Vec3& target_llh,
         const isce3::core::Orbit& orbit,
@@ -111,8 +122,18 @@ inline void writeVectorDerivedCubes(const int array_pos_i,
 
     // Ground-track velocity
     if (ground_track_velocity_raster != nullptr) {
+        // cosine law: c^2 = a^2 + b^2 - 2.a.b.cos(AB)
+        // cos(AB) = (a^2 + b^2 - c^2) / 2.a.b
+        const double slant_range = (target_xyz - sat_xyz).norm();
+        const double radius_target = target_xyz.norm();
+        const double radius_platform = sat_xyz.norm();
+        const double cos_alpha = ((radius_target * radius_target +
+                                   radius_platform * radius_platform -
+                                   slant_range * slant_range) /
+                                  (2 * radius_target * radius_platform));
+
         const double ground_velocity =
-            target_xyz.norm() * vel_xyz.norm() / sat_xyz.norm();
+            cos_alpha * radius_target * vel_xyz.norm() / radius_platform;
         ground_track_velocity_array(i, j) = ground_velocity;
     }
 
@@ -120,7 +141,7 @@ inline void writeVectorDerivedCubes(const int array_pos_i,
     const isce3::core::Vec3 look_vector_xyz =
             (sat_xyz - target_xyz).normalized();
 
-    // Compute elevation angle calculated in ECEF (geocentric)
+    // Compute elevation angle calculated in ENU (geodedic)
     if (elevation_angle_raster != nullptr) {
 
         // Get platform position in llh (sat_llh)
@@ -537,11 +558,15 @@ void makeGeolocationGridCubes(
                 double slant_range = radar_grid.slantRange(j);
                 Vec3 target_llh;
                 /*
-                Get target position (target_llh) considering grid Doppler
+                Skip processing for radar grid points outside grid doppler
                 */
                 if (!grid_doppler.contains(az_time, slant_range)) {
                     continue;
                 }
+
+                /*
+                Get target position (target_llh) considering grid Doppler
+                */
                 double fd = grid_doppler.eval(az_time, slant_range);
                 target_llh[2] = height;
 

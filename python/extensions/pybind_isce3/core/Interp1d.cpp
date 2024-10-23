@@ -1,34 +1,45 @@
 #include "Interp1d.h"
+#include "Kernels.h"
 #include <pybind11/complex.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
-#include <valarray>
 #include <isce3/core/Interp1d.h>
-#include <isce3/core/Kernels.h>
+#include <isce3/core/Linspace.h>
 #include <isce3/except/Error.h>
+#include <isce3/math/complexOperations.h>
 
 namespace py = pybind11;
 
 using namespace isce3::core;
 using isce3::except::RuntimeError;
 
-template <typename TK, typename TD>
+template <typename KernelType, typename DataType>
 static py::object
-interp_duckt(const Kernel<TK> & kernel, py::buffer_info & info, py::object t)
+interp_duckt(const Kernel<KernelType> & kernel, py::buffer_info & info, py::object t)
 {
-    TD * data = static_cast<TD *>(info.ptr);
-    int stride = info.strides[0] / sizeof(TD);
+    DataType* data = static_cast<DataType*>(info.ptr);
+    int stride = info.strides[0] / sizeof(DataType);
     auto n = info.shape[0];
     if (py::isinstance<py::float_>(t)) {
         return py::cast(interp1d(kernel, data, n, stride, py::float_(t)));
     }
     else if (py::isinstance<py::array_t<double>>(t)) {
         auto ta = py::array_t<double>(t).unchecked<1>();
-        std::valarray<TD> out(ta.size());
-        for (size_t i=0; i < ta.size(); ++i) {
-            out[i] = interp1d(kernel, data, n, stride, ta(i));
+        py::array_t<DataType> out(ta.size());
+        auto outbuf = out.mutable_data();
+        if (is_cpp_kernel(kernel)) {
+            py::gil_scoped_release release;
+            #pragma omp parallel for
+            for (size_t i=0; i < ta.size(); ++i) {
+                outbuf[i] = interp1d(kernel, data, n, stride, ta(i));
+            }
+        } else {
+            // can't release GIL since kernel is a Python object
+            for (size_t i=0; i < ta.size(); ++i) {
+                outbuf[i] = interp1d(kernel, data, n, stride, ta(i));
+            }
         }
-        return py::cast(out, py::return_value_policy::take_ownership);
+        return out;
     }
     throw RuntimeError(ISCE_SRCINFO(),
         "interp1d expects time is float or numpy.float64 array");

@@ -1,5 +1,8 @@
 # Use pinned oraclelinux:8 image
-FROM oraclelinux:8.4@sha256:ef0327c1a51e3471e9c2966b26b6245bd1f4c3f7c86d7edfb47a39adb446ceb5
+ARG repository=cae-artifactory.jpl.nasa.gov:16003/gov/nasa/jpl/iems/sds/infrastructure/base/jplsds-oraclelinux
+ARG tag=8.9.240129
+ARG digest=sha256:d374792a2ace5a17153ba8b218eb8dc6ba472ab0bfa4c0d32b6ed6b72379a0f2
+FROM ${repository}:${tag}@${digest}
 
 RUN yum-config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo
 
@@ -11,15 +14,18 @@ RUN yum update -y \
 
 # install latest miniconda
 ARG conda_prefix
-RUN curl -sSL https://repo.anaconda.com/miniconda/Miniconda3-py39_4.12.0-Linux-x86_64.sh \
+RUN curl -sSL https://repo.anaconda.com/miniconda/Miniconda3-py312_24.5.0-0-Linux-x86_64.sh \
         -o miniconda.sh \
  && bash miniconda.sh -b -p $conda_prefix \
  && rm miniconda.sh
 ENV PATH="$conda_prefix/bin:$PATH"
 
+# use the libmamba solver, which is faster and has better diagnostics
+RUN conda config --set solver libmamba
+
 COPY spec-file.txt /tmp/spec-file.txt
 RUN conda install --yes --file /tmp/spec-file.txt \
- && conda clean -tipsy \
+ && conda clean -ay \
  && rm -rf /opt/conda/pkgs \
  && rm /tmp/spec-file.txt
 

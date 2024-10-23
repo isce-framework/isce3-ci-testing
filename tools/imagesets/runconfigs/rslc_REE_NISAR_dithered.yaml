@@ -54,8 +54,8 @@ runconfig:
         processing:
             output_grid:
                 # 4096x512
-                start_time: 2021-07-01T03:20:02.255669013
-                end_time: 2021-07-01T03:20:04.738093255
+                start_time: 2021-07-01T03:20:02.255669
+                end_time: 2021-07-01T03:20:04.738093
                 start_range: 960279.2582747354
                 end_range: 963477.0444934021
                 # 128x128
@@ -102,14 +102,6 @@ runconfig:
                     # Lookup table Azimuth spacing in s
                     azimuth: 1.0
 
-                rdr2geo:
-                    # Slant range convergence threshold (m): float (default: 1.0e-8)
-                    threshold: 1.0e-8
-                    # Max number of primary iterations: int (default: 25)
-                    maxiter: 25
-                    # Max number of secondary iterations: int (default: 15)
-                    extraiter: 15
-
             # Settings for range compression algorithm.
             rangecomp:
                 # Convolution output mode: {"valid", "full", "same"} (default: "full")
@@ -143,23 +135,6 @@ runconfig:
                     fit: Table # null or Cheby or Table
                     fit_order: 2048
 
-                rdr2geo:
-                    # Slant range convergence threshold (m): float (default: 1.0e-8)
-                    threshold: 1.0e-8
-                    # Max number of primary iterations: int (default: 25)
-                    maxiter: 25
-                    # Max number of secondary iterations: int (default: 15)
-                    extraiter: 15
-
-                geo2rdr:
-                    # Slant range convergence threshold (m): float (default: 1.0e-8)
-                    threshold: 1.0e-8
-                    # Max number of iterations: int (default: 50)
-                    maxiter: 50
-                    # Step size for computing numerical gradient of Doppler (m): float
-                    # (default: 10.)
-                    delta_range: 10.
-
             dry_troposphere_model: nodelay # TSX
 
             dem:
@@ -181,7 +156,7 @@ runconfig:
             # Default is 1.0.
             # The largest representable float16 value is 65504.
             # NOTE This is ad-hoc until the processor is radiometrically calibrated.
-            encoding_scale_factor: 1.0e-8
+            encoding_scale_factor: 1.0
 
             # Whether to delete temporary files. default=True
             delete_tempfiles: True
@@ -194,7 +169,7 @@ runconfig:
                 # range compression
                 rangecomp: True
                 # elevation antenna pattern correction
-                eap: True
+                eap: False
                 # R^4 spreading loss correction
                 range_cor: True
                 # azimuth compression
@@ -203,4 +178,6 @@ runconfig:
             workflows:
                 validate: true
                 qa_reports: true
-                nesz: true
+                absolute_radiometric_calibration: true
+                nes0: true
+                point_target_analyzer: true

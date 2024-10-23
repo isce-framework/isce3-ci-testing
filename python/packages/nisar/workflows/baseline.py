@@ -1,20 +1,24 @@
 #!/usr/bin/env python3
 
-import os
-import h5py
-import numpy as np
-import pathlib
-import time
-import journal
-from osgeo import gdal, osr
-import isce3
 import copy
+import os
+import time
 
+import isce3
+import journal
+import numpy as np
+from osgeo import gdal
+from scipy.interpolate import griddata
+
+from isce3.core import crop_external_orbit
+from isce3.io import HDF5OptimizedReader
+from nisar.products.insar.product_paths import CommonPaths
 from nisar.products.readers import SLC
-from nisar.workflows.baseline_runconfig import BaselineRunConfig
-from nisar.workflows.yaml_argparse import YamlArgparse
-from nisar.workflows.compute_stats import compute_stats_real_data
+from nisar.products.readers.orbit import load_orbit_from_xml
 from nisar.workflows import h5_prep
+from nisar.workflows.baseline_runconfig import BaselineRunConfig
+from nisar.workflows.compute_stats import compute_stats_real_data
+from nisar.workflows.yaml_argparse import YamlArgparse
 
 
 def read_geo2rdr(scratch):
@@ -52,6 +56,9 @@ def write_xyz_data(data, output):
     output: str
         path for output file
     """
+    info_channel = journal.info("baseline.run.write_xyz_data")
+    error_channel = journal.error("baseline.run.write_xyz_data")
+
     gdal_type = gdal.GDT_Float32
     image_size = data.shape
 
@@ -60,17 +67,39 @@ def write_xyz_data(data, output):
     elif len(image_size) == 2:
         ny, nx = image_size
         nim = 1
+    else:
+        err_str = "Input data must be 2D or 3D."
+        error_channel.log(err_str)
+        raise ValueError(err_str)
+
+    if np.isnan(data).any():
+        info_channel.log("NaN values found in x/y/z data. "
+                         "This will be replaced with nearest neighbors.")
+
+        y, x = np.indices(data.shape[-2:])
+        valid_mask = ~np.isnan(data)
+        coords = np.array([x[valid_mask], y[valid_mask]]).T
+        values = data[valid_mask]
+
+        data[np.isnan(data)] = griddata(coords,
+                                        values,
+                                        (x[np.isnan(data)],
+                                         y[np.isnan(data)]),
+                                        method='nearest')
 
     # create the 3-band raster file
     dst_ds = gdal.GetDriverByName('ENVI').Create(
                     output, nx, ny, nim, gdal_type)
+    if dst_ds is None:
+        err_str = f"Could not create output file at {output}."
+        error_channel.log(err_str)
+        raise IOError(err_str)
+    # Write data to file
     if nim == 1:
         dst_ds.GetRasterBand(1).WriteArray(np.squeeze(data))
     else:
         for im_ind in range(nim):
-            # write to disk
-            dst_ds.GetRasterBand(im_ind+1).WriteArray(
-                np.squeeze(data[im_ind, :, :]))
+            dst_ds.GetRasterBand(im_ind + 1).WriteArray(data[im_ind])
 
 
 def write_xyz(scratch_path,
@@ -133,28 +162,27 @@ def compute_rng_aztime(scratch, radargrid):
 
     rg_off, az_off = read_geo2rdr(scratch)
 
-    az_off[az_off==-1000000] = np.nan
-    rg_off[rg_off==-1000000] = np.nan
+    az_off[az_off == -1000000] = np.nan
+    rg_off[rg_off == -1000000] = np.nan
 
-    rpixel = np.repeat(np.reshape(
-                np.arange(rg_off.shape[1]),[1, rg_off.shape[1]]),
-                          rg_off.shape[0], axis=0)
-    apixel = np.repeat(np.reshape(
-                np.arange(az_off.shape[0]),[rg_off.shape[0], 1]),
-                az_off.shape[1], axis=1)
+    rpixel = np.repeat(np.reshape(np.arange(rg_off.shape[1]),
+                                  [1, rg_off.shape[1]]),
+                                  rg_off.shape[0], axis=0)
+    apixel = np.repeat(np.reshape(np.arange(az_off.shape[0]),
+                                  [rg_off.shape[0], 1]),
+                                  az_off.shape[1], axis=1)
 
     rng = radargrid.starting_range \
-              + (rg_off + rpixel)\
-              * radargrid.range_pixel_spacing
+        + (rg_off + rpixel)\
+        * radargrid.range_pixel_spacing
     azt = radargrid.sensing_start \
-              + (az_off + apixel) / radargrid.prf
+        + (az_off + apixel) / radargrid.prf
 
     return rng, azt
 
 
 def _get_rgrid_dopp_orbit(slc_obj, orbit_path=None):
-    '''
-    Internal helper to get radargrid, doppler, and orbit
+    """Internal helper to get radargrid, doppler, and orbit
     from SLC object to avoid repeating code
 
     Parameters
@@ -173,17 +201,18 @@ def _get_rgrid_dopp_orbit(slc_obj, orbit_path=None):
         doppler LUT2D
     orbit: isce3.core.Orbit
         orbit object
-    '''
-    # import external orbit if file exists
-    if orbit_path is not None:
-        orbit = load_orbit_from_xml(orbit_path)
-    else:
-        orbit = slc_obj.getOrbit()
+    """
 
     # if frequency A exists, use frequencyA doppler,
     # if not, use frequency B instead.
     freq = 'A' if 'A' in slc_obj.frequencies else 'B'
     radargrid = slc_obj.getRadarGrid(freq)
+
+    # import external orbit if file exists
+    orbit = slc_obj.getOrbit()
+    if orbit_path is not None:
+        external_orbit = load_orbit_from_xml(orbit_path, radargrid.ref_epoch)
+        orbit = crop_external_orbit(external_orbit, orbit)
 
     # baseline is estimated assuming native-doppler
     doppler = slc_obj.getDopplerCentroid(frequency=freq)
@@ -192,10 +221,12 @@ def _get_rgrid_dopp_orbit(slc_obj, orbit_path=None):
     return radargrid, doppler, orbit
 
 
-def _prepare_baseline_datasets(dst_h5, perp_base_path, para_base_path,
-                              grid_path, cubes_shape):
-    """
-    Internal convenience function that creates baseline datasets
+def _prepare_baseline_datasets(dst_h5,
+                               perp_base_path,
+                               para_base_path,
+                               grid_path,
+                               cubes_shape):
+    """Internal convenience function that creates baseline datasets
 
     Parameters
     ----------
@@ -232,13 +263,45 @@ def _prepare_baseline_datasets(dst_h5, perp_base_path, para_base_path,
         bmode_cap = bmode.capitalize()
         descr = f"{bmode_cap} component of the InSAR baseline"
 
-        h5_prep._create_datasets(dst_h5[grid_path],
-                        cubes_shape,
-                        np.float32,
-                        f"{bmode}Baseline",
-                        descr=descr,
-                        units="meters",
-                        long_name=f'{bmode} baseline')
+        h5_prep._create_datasets(
+            dst_h5[grid_path],
+            cubes_shape,
+            np.float32,
+            f"{bmode}Baseline",
+            descr=descr,
+            units="meters",
+            long_name=f'{bmode} baseline')
+
+
+def _get_invalid_regions(slant_range,
+                         min_slant_range,
+                         max_slant_range):
+    """
+    Finds invalid regions using slant range,
+    considering the specified minimum and maximum range,
+    and also checks for NaN values.
+
+    Parameters
+    ----------
+    slant_range : numpy.ndarray
+        numpy array representing the slant range distances
+        for reference acquisition.
+    min_slant_range : float
+        Minimum valid value for the slant range.
+    max_slant_range : float
+        Maximum valid value for the slant range.
+
+    Returns
+    -------
+    invalid_region : numpy.ndarray
+        A boolean array where True indicates
+        invalid regions in the slant range array.
+    """
+    invalid_region = \
+        (slant_range > max_slant_range) | \
+        (slant_range < min_slant_range) | \
+        (np.isnan(slant_range))
+    return invalid_region
 
 
 def compute_baseline(ref_rngs,
@@ -248,14 +311,8 @@ def compute_baseline(ref_rngs,
                      coord_set,
                      ref_orbit,
                      sec_orbit,
-                     ref_doppler,
-                     sec_doppler,
-                     ref_radargrid,
-                     sec_radargrid,
                      ellipsoid,
-                     epsg_code,
-                     geo2rdr_parameters,
-                     use_gpu=False):
+                     epsg_code):
     """Returns perpendicular and parallel components of
     spatial baseline between two SAR orbits.
 
@@ -279,26 +336,11 @@ def compute_baseline(ref_rngs,
         orbit object for the reference acquisition
     sec_orbit: isce3.core.Orbit
         orbit object for the secondary acquisition
-    ref_doppler: isce3.core.LUT2d
-        doppler LUT2D for the reference acquisition
-    sec_doppler: isce3.core.LUT2d
-        doppler LUT2D for the secondary acquisition
-    ref_radargrid: isce3.product.RadarGridParameters
-        radarGridParameters object for the reference acquisition
-    sec_radargrid: isce3.product.RadarGridParameters
-        radarGridParameters object for the secondary acquisition
     ellipsoid: isce3.core.Ellipsoid
         an instance of the Ellipsoid class
     epsg_code: int
         epsg code for coord_set
-    geo2rdr_parameters: dict
-        A dictionary representing the parameters used in geo2rdr computation.
-        The dictionary includes three keys: threshold, maxiter, delta_range
-        e.g., geo2rdr_parameters = {'threshold': 1.0e-8,
-                                    'maxiter': 50,
-                                    'delta_range': 1.0e-8}
-    use_gpu: bool
-        bool type for gpu usage
+
     Returns
     -------
     par_baseline_array: numpy.ndarray
@@ -310,8 +352,9 @@ def compute_baseline(ref_rngs,
     """
 
     proj = isce3.core.make_projection(epsg_code)
-
     meta_rows, meta_cols = ref_rngs.shape
+
+    # Initialize output arrays
     perp_baseline_array = np.zeros([meta_rows, meta_cols])
     par_baseline_array = np.zeros([meta_rows, meta_cols])
 
@@ -333,31 +376,36 @@ def compute_baseline(ref_rngs,
                 ref_xyz, ref_vel = ref_orbit.interpolate(ref_azt)
                 # get the sensor position at the sec_aztime
                 # on the secondary orbit
-                sec_xyz, sec_vel = sec_orbit.interpolate(sec_azt)
+                sec_xyz, _ = sec_orbit.interpolate(sec_azt)
 
                 # compute the baseline
                 baseline = np.linalg.norm(sec_xyz - ref_xyz)
 
-                # compute the cosine of the angle between the baseline vector and the
-                # reference LOS vector (refernce sensor to target)
+                # compute the cosine of the angle between the baseline vector
+                # and the reference LOS vector (refernce sensor to target)
                 if baseline == 0:
                     cos_vbase_los = 1
                 else:
-                    cos_vbase_los = (ref_rng ** 2 + baseline ** 2 - sec_rng ** 2) / (
-                        2.0 * ref_rng * baseline)
+                    cos_vbase_los = (ref_rng ** 2 + baseline ** 2
+                                     - sec_rng ** 2) / (
+                                    2.0 * ref_rng * baseline)
 
-                # project the baseline to LOS to get the parallel component of the baseline
-                # (i.e., parallel to the LOS direction)
+                # project the baseline to LOS to get the parallel component
+                # of the baseline (i.e., parallel to the LOS direction)
                 # parallel baseline in refernce LOS direction is positive
                 parallel_baseline = baseline * cos_vbase_los
 
-                # project the baseline to the normal to to the reference LOS direction
+                # project the baseline to the normal to
+                # the reference LOS direction
                 perp_baseline_temp = baseline * np.sqrt(1 - cos_vbase_los ** 2)
 
                 # get the direction sign of the perpendicular baseline.
-                # positive perpendicular baseline is defined at below to LOS vector
+                # positive perpendicular baseline is defined
+                # at below to LOS vector
                 direction = np.sign(
-                    np.dot(np.cross(target_xyz - ref_xyz, sec_xyz - ref_xyz), ref_vel))
+                    np.dot(np.cross(target_xyz - ref_xyz,
+                                    sec_xyz - ref_xyz),
+                           ref_vel))
                 perpendicular_baseline = direction * perp_baseline_temp
 
                 perp_baseline_array[row_ind, col_ind] = perpendicular_baseline
@@ -416,7 +464,10 @@ def add_baseline(output_paths,
                  "perpendicularBaseline":
                             {metadata_path}/perpendicularBaseline,
                  "parallelBaseline": {metadata_path}/parallelBaseline,
-                 "epsg": {metadata_path}/epsg}
+                 "epsg": {metadata_path}/epsg},
+                 "projection": {metadata_path}/projection},
+                 "range_start",
+                 "range_end",
         where metadata_path = /science/LSAR/RIFG/metadata/geolocationGrid
 
     geo2rdr_parameters: dict
@@ -435,8 +486,6 @@ def add_baseline(output_paths,
     """
     error_channel = journal.error('baseline.run')
 
-    common_parent_path = 'science/LSAR'
-
     # CPU or GPU geo2rdr
     if use_gpu:
         geo2rdr = isce3.cuda.geometry.Geo2Rdr
@@ -450,10 +499,10 @@ def add_baseline(output_paths,
         product_id = next(iter(output_paths))
     elif first_product_id.startswith('G'):
         radar_or_geo = 'geo'
-        product_id = 'GUNW'
+        product_id = next(iter(output_paths))
 
     output_hdf5 = output_paths[product_id]
-    dst_meta_path = f'{common_parent_path}/{product_id}/metadata'
+    dst_meta_path = f'{CommonPaths.RootPath}/{product_id}/metadata'
 
     # read 3d cube size from arbitary metadata
     if radar_or_geo == 'radar':
@@ -461,7 +510,7 @@ def add_baseline(output_paths,
         cube_ref_dataset = f'{grid_path}/coordinateX'
     else:
         grid_path = f"{dst_meta_path}/radarGrid"
-        cube_ref_dataset = f'{grid_path}/slantRange'
+        cube_ref_dataset = f'{grid_path}/referenceSlantRange'
 
     # Remove product_id from copy of output_paths to track
     # other products to insert baseline into.
@@ -470,16 +519,25 @@ def add_baseline(output_paths,
     residual_output_paths = copy.deepcopy(output_paths)
     del residual_output_paths[product_id]
 
-    with h5py.File(output_hdf5, "a") as dst_h5:
+    with HDF5OptimizedReader(name=output_hdf5, mode="a") as dst_h5:
 
         height_levels = dst_h5[metadata_path_dict["heights"]][:]
         coord_x = dst_h5[metadata_path_dict["coordX"]][:]
         coord_y = dst_h5[metadata_path_dict["coordY"]][:]
-        epsg_code = dst_h5[metadata_path_dict["epsg"]][()]
-
+        if 'projection' not in metadata_path_dict:
+            # L1 products have the 'epsg' dataset
+            epsg_code = dst_h5[metadata_path_dict["epsg"]][()]
+        else:
+            # L2 products have the 'projection' dataset that includes
+            # the `epsg_code` attribute
+            epsg_code = \
+                dst_h5[metadata_path_dict["projection"]].attrs['epsg_code']
+        slant_range = dst_h5[metadata_path_dict["slantRange"]][:]
         proj = isce3.core.make_projection(epsg_code)
         ellipsoid = proj.ellipsoid
 
+        slant_range_min = metadata_path_dict["range_start"]
+        slant_range_max = metadata_path_dict["range_end"]
         # Read row and column size from metadata.
         cube_row = dst_h5[cube_ref_dataset].shape[1]
         cube_col = dst_h5[cube_ref_dataset].shape[2]
@@ -518,7 +576,7 @@ def add_baseline(output_paths,
 
         for height_ind, height in enumerate(height_list):
 
-            if radar_or_geo =='geo':
+            if radar_or_geo == 'geo':
                 # coordX and coordY have one dimension
                 grid_x, grid_y = np.meshgrid(coord_x, coord_y)
             else:
@@ -529,7 +587,7 @@ def add_baseline(output_paths,
                 grid_y = np.squeeze(coord_y[height_level_ind, :, :])
 
             height_2d = height * np.ones([cube_row, cube_col],
-                                       dtype='float32')
+                                         dtype='float32')
             topovrt_path = write_xyz(baseline_dir_path,
                                      grid_x,
                                      grid_y,
@@ -563,6 +621,19 @@ def add_baseline(output_paths,
             sec_rngs, sec_azts = \
                 compute_rng_aztime(base_dir_set[1], sec_radargrid)
 
+            # get invalid regions where the slant distance
+            # is out of observable range.
+            if radar_or_geo == 'geo':
+                invalid = _get_invalid_regions(
+                    np.squeeze(slant_range[height_ind, :, :]),
+                    min_slant_range=slant_range_min,
+                    max_slant_range=slant_range_max)
+            else:
+                invalid_range = _get_invalid_regions(
+                    np.squeeze(slant_range),
+                    min_slant_range=slant_range_min,
+                    max_slant_range=slant_range_max)
+                invalid = np.tile(invalid_range, (cube_row, 1))
             par_baseline, perp_baseline = compute_baseline(
                 ref_rngs,
                 ref_azts,
@@ -571,15 +642,10 @@ def add_baseline(output_paths,
                 coord_set,
                 ref_orbit,
                 sec_orbit,
-                ref_doppler,
-                sec_doppler,
-                ref_radargrid,
-                sec_radargrid,
                 ellipsoid,
-                epsg_code,
-                geo2rdr_parameters,
-                use_gpu)
-
+                epsg_code)
+            par_baseline[invalid] = np.nan
+            perp_baseline[invalid] = np.nan
             ds_bpar[height_ind, :, :] = par_baseline
             ds_bperp[height_ind, :, :] = perp_baseline
 
@@ -596,12 +662,14 @@ def add_baseline(output_paths,
         # are requested
         for residual_key in residual_output_paths.keys():
             perp_base_path = metadata_path_dict["perpendicularBaseline"
-                            ].replace(product_id, residual_key)
+                                                ].replace(product_id,
+                                                          residual_key)
             para_base_path = metadata_path_dict["parallelBaseline"
-                            ].replace(product_id, residual_key)
+                                                ].replace(product_id,
+                                                          residual_key)
             grid_path_resi = grid_path.replace(product_id, residual_key)
 
-            with h5py.File(output_paths[residual_key], "r+") as h5_resi:
+            with HDF5OptimizedReader(name=output_paths[residual_key], mode="r+") as h5_resi:
 
                 _prepare_baseline_datasets(h5_resi,
                                            perp_base_path,
@@ -636,8 +704,8 @@ def copy_attr(src_ds, dst_ds):
 
 
 def run(cfg: dict, output_paths):
-    """computes the parallel and perpendicular baseline cubes
-    and adds them to the InSAR product's metadata 3D cubes.
+    """Compute the parallel and perpendicular baseline cubes and add them to
+    the InSAR product's metadata 3D cubes.
     The baseline cubes are baseline components computed assuming different
     heights on ground such that each layer represents
     the baseline at a given height.
@@ -645,9 +713,9 @@ def run(cfg: dict, output_paths):
     Parameters
     ----------
     cfg: dict
-        a dictionary of the insar.py configuration workflow
+        A dictionary of the insar.py configuration workflow
     output_paths: dict
-        a dictionary conatining the different InSAR product paths
+        A dictionary conatining the different InSAR product paths
         e.g.: output_paths={"RIFG": "/home/process/insar_rifg.h5",
                             "GUNW": "/home/process/insar_gunw.h5"}
 
@@ -655,9 +723,9 @@ def run(cfg: dict, output_paths):
     ref_hdf5 = cfg["input_file_group"]["reference_rslc_file"]
     sec_hdf5 = cfg["input_file_group"]["secondary_rslc_file"]
     scratch_path = cfg['product_path_group']['scratch_path']
-    ref_orbit_path = cfg['dynamic_ancillary_file_group']['orbit'][
+    ref_orbit_path = cfg['dynamic_ancillary_file_group']['orbit_files'][
                          'reference_orbit_file']
-    sec_orbit_path = cfg['dynamic_ancillary_file_group']['orbit'][
+    sec_orbit_path = cfg['dynamic_ancillary_file_group']['orbit_files'][
                          'secondary_orbit_file']
     baseline_mode = cfg['processing']['baseline']['mode']
     baseline_dir_path = f'{scratch_path}/baseline'
@@ -685,9 +753,11 @@ def run(cfg: dict, output_paths):
         _get_rgrid_dopp_orbit(ref_slc, ref_orbit_path)
     sec_radargrid, sec_doppler, sec_orbit = \
         _get_rgrid_dopp_orbit(sec_slc, sec_orbit_path)
-
+    range_start = ref_radargrid.starting_range
+    range_end = range_start + \
+        ref_radargrid.width * ref_radargrid.range_pixel_spacing
     geo2rdr_parameters = cfg["processing"]["geo2rdr"]
-    common_path = 'science/LSAR'
+    common_path = CommonPaths.RootPath
 
     radar_products = {dst: output_paths[dst]
                       for dst in output_paths.keys()
@@ -698,33 +768,35 @@ def run(cfg: dict, output_paths):
 
     if geo_products:
         # only GUNW product have information requred to compute baesline.
-        product_id = 'GUNW'
+        product_id = next(iter(geo_products))
         dst_meta_path = f'{common_path}/{product_id}/metadata'
         grid_path = f"{dst_meta_path}/radarGrid"
-        output_paths_gunw = {"GUNW": output_paths["GUNW"]}
         metadata_path_dict = {
             "heights": f"{grid_path}/heightAboveEllipsoid",
-            "azimuthTime": f"{grid_path}/zeroDopplerAzimuthTime",
-            "slantRange": f"{grid_path}/slantRange",
+            "azimuthTime": f"{grid_path}/referenceZeroDopplerAzimuthTime",
+            "slantRange": f"{grid_path}/referenceSlantRange",
             "coordX": f"{grid_path}/xCoordinates",
             "coordY": f"{grid_path}/yCoordinates",
             "perpendicularBaseline": f"{grid_path}/perpendicularBaseline",
             "parallelBaseline": f"{grid_path}/parallelBaseline",
-            "epsg": f"{grid_path}/epsg",
+            "projection": f"{grid_path}/projection",
+            "range_start": range_start,
+            "range_end": range_end,
             }
 
-        add_baseline(geo_products,
-                    ref_orbit,
-                    sec_orbit,
-                    ref_radargrid,
-                    sec_radargrid,
-                    ref_doppler,
-                    sec_doppler,
-                    metadata_path_dict,
-                    geo2rdr_parameters,
-                    use_gpu,
-                    baseline_dir_path,
-                    baseline_mode)
+        add_baseline(
+            geo_products,
+            ref_orbit,
+            sec_orbit,
+            ref_radargrid,
+            sec_radargrid,
+            ref_doppler,
+            sec_doppler,
+            metadata_path_dict,
+            geo2rdr_parameters,
+            use_gpu,
+            baseline_dir_path,
+            baseline_mode)
 
     if radar_products:
         product_id = next(iter(radar_products))
@@ -740,23 +812,28 @@ def run(cfg: dict, output_paths):
             "perpendicularBaseline": f"{grid_path}/perpendicularBaseline",
             "parallelBaseline": f"{grid_path}/parallelBaseline",
             "epsg": f"{grid_path}/epsg",
+            "range_start": range_start,
+            "range_end": range_end,
             }
 
-        add_baseline(radar_products,
-                    ref_orbit,
-                    sec_orbit,
-                    ref_radargrid,
-                    sec_radargrid,
-                    ref_doppler,
-                    sec_doppler,
-                    metadata_path_dict,
-                    geo2rdr_parameters,
-                    use_gpu,
-                    baseline_dir_path,
-                    baseline_mode)
+        add_baseline(
+            radar_products,
+            ref_orbit,
+            sec_orbit,
+            ref_radargrid,
+            sec_radargrid,
+            ref_doppler,
+            sec_doppler,
+            metadata_path_dict,
+            geo2rdr_parameters,
+            use_gpu,
+            baseline_dir_path,
+            baseline_mode)
 
     t_all_elapsed = time.time() - t_all
-    info_channel.log(f"successfully ran baseline in {t_all_elapsed:.3f} seconds")
+    info_channel.log("successfully ran baseline "
+                     f"in {t_all_elapsed:.3f} seconds")
+
 
 if __name__ == "__main__":
     # parse CLI input

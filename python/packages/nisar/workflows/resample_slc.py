@@ -12,7 +12,7 @@ import journal
 import isce3
 from osgeo import gdal
 from nisar.products.readers import SLC
-from nisar.workflows.helpers import complex_raster_path_from_h5
+from nisar.workflows.helpers import copy_raster
 from nisar.workflows.resample_slc_runconfig import ResampleSlcRunConfig
 from nisar.workflows.yaml_argparse import YamlArgparse
 
@@ -59,8 +59,6 @@ def run(cfg, resample_type):
                                     f'{resample_type}_resample_slc' / f'freq{freq}'
         if resample_type == 'coarse':
             offsets_path = offsets_dir / 'geo2rdr' / f'freq{freq}'
-            rg_off = isce3.io.Raster(str(offsets_path / 'range.off'))
-            az_off = isce3.io.Raster(str(offsets_path / 'azimuth.off'))
         else:
             # We checked the existence of HH/VV offsets in resample_slc_runconfig.py
             # Select the first offsets available between HH and VV
@@ -69,8 +67,8 @@ def run(cfg, resample_type):
                 offsets_path = freq_offsets_path/'HH'
             else:
                 offsets_path = freq_offsets_path/'VV'
-            rg_off = isce3.io.Raster(str(offsets_path / 'range.off.vrt'))
-            az_off = isce3.io.Raster(str(offsets_path / 'azimuth.off.vrt'))
+        rg_off = isce3.io.Raster(str(offsets_path / 'range.off'))
+        az_off = isce3.io.Raster(str(offsets_path / 'azimuth.off'))
 
         # Create resample slc directory
         resample_slc_scratch_path.mkdir(parents=True, exist_ok=True)
@@ -96,18 +94,17 @@ def run(cfg, resample_type):
             out_dir.mkdir(parents=True, exist_ok=True)
             out_path = out_dir / 'coregistered_secondary.slc'
 
-            # Perform complex32 to complex64 conversion if necessary
-            c32_output_path = str(out_dir/'secondary.slc')
-            raster_path, _ = complex_raster_path_from_h5(slc, freq, pol,
-                                                         input_hdf5,
-                                                         resamp_args['lines_per_tile'],
-                                                         c32_output_path)
-            raster = isce3.io.Raster(raster_path)
+            # Dump secondary RSLC on disk
+            raster_path = str(out_dir/'secondary.slc')
+            copy_raster(input_hdf5, freq, pol, 1000,
+                        raster_path, file_type='ENVI')
+            input_raster = isce3.io.Raster(raster_path)
 
             # Create output raster
             resamp_slc = isce3.io.Raster(str(out_path), rg_off.width,
-                                         rg_off.length, rg_off.num_bands, gdal.GDT_CFloat32, 'ENVI')
-            resamp_obj.resamp(raster, resamp_slc, rg_off, az_off)
+                                         rg_off.length, rg_off.num_bands,
+                                         gdal.GDT_CFloat32, 'ENVI')
+            resamp_obj.resamp(input_raster, resamp_slc, rg_off, az_off)
 
     t_all_elapsed = time.time() - t_all
     info_channel.log(f"successfully ran resample in {t_all_elapsed:.3f} seconds")

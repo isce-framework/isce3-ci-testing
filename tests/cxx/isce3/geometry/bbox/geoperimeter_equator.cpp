@@ -145,9 +145,15 @@ TEST_P(PerimeterTest, Normal) {
     //Number of points per edge - default value
     int nPtsPerEdge = 11;
 
+    const auto dem = isce3::geometry::DEMInterpolator(0.);
+    const auto zerodop = isce3::core::LUT2d<double>();
+    // Use stricter tolerance than default for compatibility with precision
+    // of old test.
+    const double htol = 1e-8;
+
     //Compute perimeter
-    isce3::geometry::Perimeter perimeter = isce3::geometry::getGeoPerimeter(grid, orbit,
-                                                proj);
+    auto perimeter = isce3::geometry::getGeoPerimeter(
+            grid, orbit, proj, zerodop, dem, nPtsPerEdge, htol);
 
     //Check length of perimeter for default edge length 
     ASSERT_EQ( perimeter.getNumPoints(), 4 * nPtsPerEdge - 4 + 1);   
@@ -191,11 +197,20 @@ TEST_P(PerimeterTest, Normal) {
     }
 
     //Test left edge
-    for (int ii=nPtsPerEdge-2; ii >=0; ii--)
+    for (int ii=nPtsPerEdge-2; ii > 0; ii--)
     {
         double tinp = times[ii];
         double rng = ranges[0];
         pts.push_back( std::make_tuple(tinp, rng));
+    }
+
+    // Close polygon.
+    pts.push_back(pts[0]);
+
+    // For left-looking we start at the same point but go in reverse order from
+    // radar POV to get consistent CCW order on the map.
+    if (side == LookSide::Left) {
+        std::reverse(pts.begin(), pts.end());
     }
 
     int ii=0;
@@ -221,15 +236,14 @@ TEST_P(PerimeterTest, Normal) {
         perimeter.getPoint(ii, &pt);
 
         // Check
-        ASSERT_NEAR(pt.getX(), expLLH[0] * degrees, 1.0e-8);
+        EXPECT_NEAR(pt.getX(), expLLH[0] * degrees, 1.0e-8);
         if (grid.lookSide() == LookSide::Left) {
-            ASSERT_NEAR(pt.getY(), expLLH[1] * degrees, 1.0e-8);
+            EXPECT_NEAR(pt.getY(), expLLH[1] * degrees, 1.0e-8);
         } else {
-            ASSERT_NEAR(pt.getY(), -expLLH[1] * degrees, 1.0e-8);
+            EXPECT_NEAR(pt.getY(), -expLLH[1] * degrees, 1.0e-8);
         }
-        ASSERT_NEAR(pt.getZ(), 0.0, 1.0e-8);
+        EXPECT_NEAR(pt.getZ(), 0.0, htol);
         ii++;
-
     }
 
     delete proj;

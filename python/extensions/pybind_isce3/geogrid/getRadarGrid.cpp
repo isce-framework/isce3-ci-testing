@@ -23,7 +23,7 @@ void addbinding_get_radar_grid(pybind11::module& m)
           py::arg("slant_range_raster") = nullptr,
           py::arg("azimuth_time_raster") = nullptr,
           py::arg("incidence_angle_raster") = nullptr,
-          py::arg("lo_unit_vector_x_raster") = nullptr,
+          py::arg("los_unit_vector_x_raster") = nullptr,
           py::arg("los_unit_vector_y_raster") = nullptr,
           py::arg("along_track_unit_vector_x_raster") = nullptr,
           py::arg("along_track_unit_vector_y_raster") = nullptr,
@@ -37,8 +37,8 @@ void addbinding_get_radar_grid(pybind11::module& m)
              Each output layer is saved onto the first band of its
              associated raster file.
              
-             The line-of-sight (LOS) and along-track unit vectors are
-             referenced to ENU coordinates computed wrt targets.
+             The target-to-sensor line-of-sight (LOS) and along-track unit
+             vectors are referenced to ENU coordinates computed wrt targets.
 
              Parameters
              ----------

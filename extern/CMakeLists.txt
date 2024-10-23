@@ -77,6 +77,13 @@ macro(getpackage_hdf5)
             INTERFACE_LINK_LIBRARIES      "${HDF5_CXX_LIBRARIES}"
             )
         install(TARGETS hdf5 EXPORT isce3-targets)
+    else()
+        # FindHDF5's HDF5::HDF5 does not reflect the transitive MPI dependency,
+        # so we need to explicitly add it to the HDF5 interface here.
+        # Otherwise including hdf5.h may fail with a missing mpi.h error.
+        if(HDF5_IS_PARALLEL)
+            target_link_libraries(HDF5::HDF5 INTERFACE MPI::MPI_CXX)
+        endif()
     endif()
 endmacro()
 
@@ -112,18 +119,18 @@ endmacro()
 
 macro(getpackage_pyre)
     if(ISCE3_FETCH_PYRE)
-        find_package(pyre 1.11.2 CONFIG)
+        find_package(pyre 1.12.5 CONFIG)
         if(NOT pyre_FOUND)
             # disable pyre's test suite
             set(BUILD_TESTING OFF)
             fetch_extern_repo(pyre
                 GIT_REPOSITORY  https://github.com/pyre/pyre
-                GIT_TAG         v1.11.2
+                GIT_TAG         v1.12.5
                 GIT_SHALLOW     TRUE
                 )
         endif()
     else()
-        find_package(pyre 1.11.2 REQUIRED CONFIG)
+        find_package(pyre 1.12.5 REQUIRED CONFIG)
     endif()
 endmacro()
 

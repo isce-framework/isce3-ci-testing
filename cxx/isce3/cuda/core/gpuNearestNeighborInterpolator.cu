@@ -2,7 +2,7 @@
 
 #include <thrust/complex.h>
 
-using isce3::cuda::core::gpuNearestNeighborInterpolator;
+namespace isce3::cuda::core {
 
 template<class T>
 __device__ T gpuNearestNeighborInterpolator<T>::interpolate(
@@ -19,4 +19,7 @@ template class gpuNearestNeighborInterpolator<thrust::complex<double>>;
 template class gpuNearestNeighborInterpolator<float>;
 template class gpuNearestNeighborInterpolator<thrust::complex<float>>;
 template class gpuNearestNeighborInterpolator<unsigned char>;
+template class gpuNearestNeighborInterpolator<unsigned short>;
 template class gpuNearestNeighborInterpolator<unsigned int>;
+
+} // namespace isce3::cuda::core

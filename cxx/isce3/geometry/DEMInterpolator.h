@@ -7,6 +7,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include "forward.h"
 
 // pyre
@@ -26,19 +27,11 @@ class isce3::geometry::DEMInterpolator {
     using cartesian_t = isce3::core::Vec3;
 
     public:
-        /** Default constructor with reference height of 0, bilinear interpolation */
-        inline DEMInterpolator() :
-            _haveRaster{false},
-            _refHeight{0.0},
-            _minValue{0.0},
-            _meanValue{0.0},
-            _maxValue{0.0},
-            _interpMethod{isce3::core::BILINEAR_METHOD} {}
-
         /** Constructor with custom reference height and bilinear interpolation */
-        inline DEMInterpolator(float height, int epsg = 4326) :
+        inline DEMInterpolator(float height = 0.0, int epsg = 4326) :
             _haveRaster{false},
             _refHeight{height},
+            _haveStats{true},
             _minValue{height},
             _meanValue{height},
             _maxValue{height},
@@ -51,6 +44,7 @@ class isce3::geometry::DEMInterpolator {
                                int epsg = 4326) :
             _haveRaster{false},
             _refHeight{height},
+            _haveStats{true},
             _minValue{height},
             _meanValue{height},
             _maxValue{height},
@@ -82,7 +76,14 @@ class isce3::geometry::DEMInterpolator {
         /** Compute min, max, and mean DEM height
          * @param[out] minValue Minimum DEM height
          * @param[out] maxValue Maximum DEM height
-         * @param[out] meanValue Mean DEM height */
+         * @param[out] meanValue Mean DEM height
+         * 
+         * This method will also set refHeight to meanValue so that this
+         * object is guaranteed to return a value h : minValue <= h <= maxValue
+         * even if the query point is out of bounds.
+         * 
+         * If stats have already been computed then no calculation is done.
+         */
         void computeMinMaxMeanHeight(float &minValue, float &maxValue,
                                      float &meanValue);
 
@@ -124,16 +125,35 @@ class isce3::geometry::DEMInterpolator {
         /** Get reference height of interpolator */
         double refHeight() const { return _refHeight; }
         /** Set reference height of interpolator */
-        void refHeight(double h) { _refHeight = h; }
+        void refHeight(double h) {
+            _refHeight = h;
+            if (not haveRaster()) {
+                _minValue = h;
+                _meanValue = h;
+                _maxValue = h;
+            }
+        }
+
+        /** Flag indicating if stats are already known. */
+        bool haveStats() const { return _haveStats; }
 
         /** Get mean height value */
-        inline float meanHeight() const { return _meanValue; }
+        inline float meanHeight() const {
+            validateStatsAccess("meanHeight");
+            return _meanValue;
+        }
 
         /** Get max height value */
-        inline float maxHeight() const { return _maxValue; }
+        inline float maxHeight() const {
+            validateStatsAccess("maxHeight");
+            return _maxValue;
+        }
 
         /** Get min height value */
-        inline float minHeight() const { return _minValue; }
+        inline float minHeight() const {
+            validateStatsAccess("minHeight");
+            return _minValue;
+        }
 
         /** Get pointer to underlying DEM data */
         float * data() { return _dem.data(); }
@@ -174,6 +194,7 @@ class isce3::geometry::DEMInterpolator {
         // Constant value if no raster is provided
         float _refHeight;
         // Statistics
+        bool _haveStats;
         float _minValue;
         float _meanValue;
         float _maxValue;
@@ -188,4 +209,7 @@ class isce3::geometry::DEMInterpolator {
         // Starting x/y for DEM subset and spacing
         double _xstart, _ystart, _deltax, _deltay;
         int _width, _length;
+
+        // Check if stats are accessed before they're computed.
+        void validateStatsAccess(const std::string& method) const;
 };

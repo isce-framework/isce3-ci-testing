@@ -12,20 +12,30 @@ using isce3::error::getErrorString;
 namespace isce3 { namespace core {
 
 Orbit::Orbit(const std::vector<StateVector> & statevecs,
-             OrbitInterpMethod interp_method)
+             OrbitInterpMethod interp_method,
+             const std::string& type)
 :
-    Orbit(statevecs, statevecs.at(0).datetime, interp_method)
+    Orbit(statevecs, statevecs.at(0).datetime, interp_method, type)
+{}
+
+Orbit::Orbit(const std::vector<StateVector> & statevecs,
+             const std::string& type)
+:
+    Orbit(statevecs, statevecs.at(0).datetime, OrbitInterpMethod::Hermite,
+          type)
 {}
 
 Orbit::Orbit(const std::vector<StateVector> & statevecs,
              const DateTime & reference_epoch,
-             OrbitInterpMethod interp_method)
+             OrbitInterpMethod interp_method,
+             const std::string& type)
 :
     _reference_epoch(reference_epoch),
     _time(detail::getOrbitTime(statevecs, reference_epoch)),
     _position(detail::getOrbitPosition(statevecs)),
     _velocity(detail::getOrbitVelocity(statevecs)),
-    _interp_method(interp_method)
+    _interp_method(interp_method),
+    _type(type)
 {}
 
 std::vector<StateVector> Orbit::getStateVectors() const
@@ -81,12 +91,50 @@ bool operator==(const Orbit & lhs, const Orbit & rhs)
            lhs.time() == rhs.time() &&
            lhs.position() == rhs.position() &&
            lhs.velocity() == rhs.velocity() &&
-           lhs.interpMethod() == rhs.interpMethod();
+           lhs.interpMethod() == rhs.interpMethod() &&
+           lhs.type() == rhs.type();
 }
 
 bool operator!=(const Orbit & lhs, const Orbit & rhs)
 {
     return !(lhs == rhs);
+}
+
+Orbit Orbit::crop(const DateTime& start, const DateTime& end, int npad) const
+{
+    const double tstart = (start - _reference_epoch).getTotalSeconds();
+    const double tend = (end - _reference_epoch).getTotalSeconds();
+
+    if (not this->contains(tstart)) {
+        std::string errmsg = "Requested start time " + start.isoformat() +
+                             " does not fall in orbit time interval [" +
+                             startDateTime().isoformat() + ", " +
+                             endDateTime().isoformat() + "].";
+        throw isce3::except::DomainError(ISCE_SRCINFO(), errmsg);
+    }
+    if (not this->contains(tend)) {
+        std::string errmsg = "Requested end time " + end.isoformat() +
+                             " does not fall in orbit time interval [" +
+                             startDateTime().isoformat() + ", " +
+                             endDateTime().isoformat() + "].";
+        throw isce3::except::DomainError(ISCE_SRCINFO(), errmsg);
+    }
+    if (npad < 0) {
+        throw isce3::except::DomainError(
+                ISCE_SRCINFO(), "npad must be positive");
+    }
+
+    const int istart = std::max(_time.search(tstart) - 1 - npad, 0);
+    const int iend = std::min(_time.search(tend) + 1 + npad, _time.size());
+    const int n = iend - istart;
+
+    std::vector<StateVector> statevecs(n);
+    for (int i = 0; i < n; ++i) {
+        const int k = i + istart;
+        const DateTime t = _reference_epoch + TimeDelta(_time[k]);
+        statevecs[i] = {t, _position[k], _velocity[k]};
+    }
+    return Orbit(statevecs, _reference_epoch, _interp_method, _type);
 }
 
 }}

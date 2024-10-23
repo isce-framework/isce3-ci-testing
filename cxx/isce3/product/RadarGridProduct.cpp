@@ -49,8 +49,6 @@ void setImageMetadataGroupStr(
         std::string &metadata_group_str)
 {
 
-    bool flag_has_swaths = false;
-
     for (const auto& key : key_vector) {
 
         // Look for HDF5 groups that match key (i.e., "grids" or "swaths")
@@ -77,13 +75,6 @@ void setImageMetadataGroupStr(
             metadata_group_str = image_group_str;
             std::size_t key_position = metadata_group_str.rfind(key);
             metadata_group_str.replace(key_position, key.length(), "metadata");
-            if (key == "swaths") {
-                /*
-                flag_has_swaths indicates if image_group_str reffers to swaths
-                or grids
-                */
-                flag_has_swaths = true;
-            }
             break;
         }
     }
@@ -114,12 +105,6 @@ RadarGridProduct(isce3::io::IH5File & file) {
     // Configure swaths
     loadFromH5(imGroup, _swaths);
 
-    // Get metadata group
-    isce3::io::IGroup metaGroup = file.openGroup(metadata_group_str);
-    // Configure metadata
-
-    loadFromH5(metaGroup, _metadata);
-
     // Get look direction
     auto identification_vector = findGroupPath(base_group, "identification");
     if (identification_vector.size() == 0) {
@@ -138,6 +123,17 @@ RadarGridProduct(isce3::io::IH5File & file) {
     isce3::io::loadFromH5(
             file, identification_group_str + "/lookDirection", lookDir);
     lookSide(lookDir);
+
+    std::string product_level = "L1";
+    if (isce3::io::exists(file, identification_group_str + "/productLevel")) {
+        isce3::io::loadFromH5(
+            file, identification_group_str + "/productLevel", product_level);
+    }
+
+    // Get metadata group
+    isce3::io::IGroup metaGroup = file.openGroup(metadata_group_str);
+    // Configure metadata
+    loadFromH5(metaGroup, _metadata, product_level);
 
     // Save the filename
     _filename = file.filename();

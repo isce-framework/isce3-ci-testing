@@ -63,7 +63,7 @@ runconfig:
                 # Azimuth bounds of output SLC, optional.
                 # Defaults to extent of raw data minus sythetic aperture and
                 start_time: 2022-01-01T00:02:57.5
-                end_time: 2022-01-01T00:02:59.020942408
+                end_time: 2022-01-01T00:02:58.5
                 # Range bounds of output SLC in meters, optional.
                 # Defaults to entire fully focused swath.
                 start_range: 887942.4
@@ -104,13 +104,6 @@ runconfig:
                     range: 2000.0
                     # Lookup table Azimuth spacing in s
                     azimuth: 1.0
-                rdr2geo:
-                    # Slant range convergence threshold (m): float (default: 1.0e-8)
-                    threshold: 1.0e-8
-                    # Max number of primary iterations: int (default: 25)
-                    maxiter: 25
-                    # Max number of secondary iterations: int (default: 15)
-                    extraiter: 15
             # Settings for range compression algorithm.
             rangecomp:
                 # Convolution output mode: {"valid", "full", "same"} (default: "full")
@@ -138,21 +131,6 @@ runconfig:
                     approx_oversample: 1.7
                     fit: Table # null or Cheby or Table
                     fit_order: 2048
-                rdr2geo:
-                    # Slant range convergence threshold (m): float (default: 1.0e-8)
-                    threshold: 1.0e-8
-                    # Max number of primary iterations: int (default: 25)
-                    maxiter: 100
-                    # Max number of secondary iterations: int (default: 15)
-                    extraiter: 15
-                geo2rdr:
-                    # Slant range convergence threshold (m): float (default: 1.0e-8)
-                    threshold: 1.0e-6
-                    # Max number of iterations: int (default: 50)
-                    maxiter: 100
-                    # Step size for computing numerical gradient of Doppler (m): float
-                    # (default: 10.)
-                    delta_range: 10.
             dry_troposphere_model: nodelay
             dem:
                 # Height (in meters) to use if DEM unavailable.
@@ -180,7 +158,7 @@ runconfig:
                 # range compression
                 rangecomp: True
                 # elevation antenna pattern correction
-                eap: True
+                eap: False
                 # R^4 spreading loss correction
                 range_cor: True
                 # azimuth compression
@@ -189,4 +167,6 @@ runconfig:
             workflows:
                 validate: true
                 qa_reports: true
-                nesz: true
+                absolute_radiometric_calibration: true
+                nes0: true
+                point_target_analyzer: true

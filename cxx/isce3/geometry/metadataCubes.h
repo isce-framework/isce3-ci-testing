@@ -14,8 +14,8 @@ namespace isce3 { namespace geometry {
  * Each output value is saved onto the first band of its
  * associated raster file.
  * 
- * The line-of-sight (LOS) and along-track unit vectors are referenced to
- * ENU coordinates computed wrt targets.
+ * The target-to-sensor line-of-sight (LOS) and along-track unit vectors are
+ * referenced to ENU coordinates computed wrt targets.
  * 
  * The terrain normal unit vector is required for computing the local-
  * incidence angle, projection angle, and simulated radar brightness. The
@@ -57,7 +57,7 @@ namespace isce3 { namespace geometry {
  * @param[in]  lookside                         Look side (required to compute
  * the projection angle and simulated radar brightness)
  */
-inline void writeVectorDerivedCubes(const int array_pos_i,
+void writeVectorDerivedCubes(const int array_pos_i,
         const int array_pos_j, const double native_azimuth_time,
         const isce3::core::Vec3& target_llh,
         const isce3::core::Orbit& orbit,

@@ -7,7 +7,9 @@
 #include <isce3/core/LUT1d.h>
 #include <thrust/complex.h>
 
-class isce3::cuda::signal::gpuCrossmul {
+namespace isce3::cuda::signal {
+
+class gpuCrossmul {
 
     public:
         gpuCrossmul() {};
@@ -44,6 +46,12 @@ class isce3::cuda::signal::gpuCrossmul {
 
         /** Get secondary doppler */
         inline const isce3::core::LUT1d<double> & secDoppler() const {return _secDoppler;};
+
+        /** Set reference and secondary starting range shift */
+        inline void startingRangeShift(double rng_shift) { _offsetStartingRangeShift = rng_shift; }
+
+        /** Get reference and secodnary starting range shift */
+        inline double startingRangeShift() const { return _offsetStartingRangeShift; }
 
         /** Set range pixel spacing */
         inline void rangePixelSpacing(double rngPxl) {_rangePixelSpacing = rngPxl;};
@@ -91,6 +99,9 @@ class isce3::cuda::signal::gpuCrossmul {
         //Doppler LUT for the secondary SLC
         isce3::core::LUT1d<double> _secDoppler;
 
+        // starting range shifts between the secondary and reference RSLC in meters
+        double _offsetStartingRangeShift = 0.0;
+
         // range pixel spacing
         double _rangePixelSpacing;
 
@@ -111,3 +122,5 @@ class isce3::cuda::signal::gpuCrossmul {
         // upsampling factor
         size_t _oversampleFactor = 1;
 };
+
+} // namespace isce3::cuda::signal

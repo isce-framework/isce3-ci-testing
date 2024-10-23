@@ -5,23 +5,28 @@ import os
 import pathlib
 import time
 
-import h5py
 import numpy as np
 from osgeo import gdal
 
 import isce3
-from isce3.ionosphere.main_band_estimation import (MainSideBandIonosphereEstimation,
+from isce3.atmosphere.main_band_estimation import (MainSideBandIonosphereEstimation,
                                                    MainDiffMsBandIonosphereEstimation)
-from isce3.ionosphere.split_band_estimation import SplitBandIonosphereEstimation
-from isce3.ionosphere.ionosphere_filter import IonosphereFilter, write_array
-from isce3.ionosphere.ionosphere_estimation import decimate_freq_a_array
+from isce3.atmosphere.split_band_estimation import SplitBandIonosphereEstimation
+from isce3.atmosphere.ionosphere_filter import IonosphereFilter, write_array
+from isce3.io import HDF5OptimizedReader
+from isce3.signal.interpolate_by_range import (decimate_freq_a_array,
+                                              interpolate_freq_b_array)
+
 from isce3.splitspectrum import splitspectrum
 
 from nisar.products.readers import SLC
 from nisar.workflows import (crossmul, dense_offsets, h5_prep,
-                             filter_interferogram, resample_slc,
+                             filter_interferogram, prepare_insar_hdf5,
+                             resample_slc_v2,
                              rubbersheet, unwrap)
+from nisar.workflows.compute_stats import compute_stats_real_hdf5_dataset
 from nisar.workflows.ionosphere_runconfig import InsarIonosphereRunConfig
+from nisar.products.insar.product_paths import CommonPaths, RUNWGroupsPaths
 from nisar.workflows.yaml_argparse import YamlArgparse
 
 
@@ -51,7 +56,7 @@ def write_disp_block_hdf5(
         err_str = f"{hdf5_path} not found"
         error_channel.log(err_str)
         raise FileNotFoundError(err_str)
-    with h5py.File(hdf5_path, 'r+') as dst_h5:
+    with HDF5OptimizedReader(name=hdf5_path, mode='r+') as dst_h5:
         block_length, block_width = data.shape
         dst_h5[path].write_direct(data,
             dest_sel=np.s_[block_row : block_row + block_length,
@@ -95,8 +100,11 @@ def decimate_freq_a_offset(iono_insar_cfg, original_dict):
         resample_type = 'coarse'
     decimated_offset_dir = offsets_dir
 
+    # Instantiate a RUNW object to get path to RUNW datasets
+    runw_obj = RUNWGroupsPaths()
+
     # Set up for decimation
-    swath_path = f"/science/LSAR/RUNW/swaths"
+    swath_path = runw_obj.SwathsPath
     dest_freq_path = f"{swath_path}/frequencyA"
     dest_freq_path_b = f"{swath_path}/frequencyB"
     rslant_path_a = f"{dest_freq_path}/interferogram/slantRange"
@@ -105,9 +113,9 @@ def decimate_freq_a_offset(iono_insar_cfg, original_dict):
     rspc_path_b = f"{dest_freq_path_b}/interferogram/slantRangeSpacing"
 
     # Read slant range array from main and side bands
-    with h5py.File(runw_freq_a_str, 'r',
+    with HDF5OptimizedReader(name=runw_freq_a_str, mode='r',
         libver='latest', swmr=True) as src_main_h5, \
-        h5py.File(runw_freq_b_str, 'r',
+        HDF5OptimizedReader(name=runw_freq_b_str, mode='r',
         libver='latest', swmr=True) as src_side_h5:
 
         # Read slant range block from HDF5
@@ -129,8 +137,6 @@ def decimate_freq_a_offset(iono_insar_cfg, original_dict):
 
             offsets_path = f'{offsets_dir}/{coarse_offset_path}'
             offsets_b_path = f'{decimated_offset_dir}/{coarse_offset_b_path}'
-
-            raster_ext = 'off'
         else:
             # We checked the existence of HH/VV offsets in resample_slc_runconfig.py
             # Select the first offsets available between HH and VV
@@ -146,13 +152,12 @@ def decimate_freq_a_offset(iono_insar_cfg, original_dict):
             else:
                 offsets_path = f'{freq_offsets_path}/VV'
                 offsets_b_path = f'{freq_offsets_b_path}/VV'
-            raster_ext = 'off.vrt'
 
-        rg_off_path = str(f'{offsets_path}/range.{raster_ext}')
-        az_off_path = str(f'{offsets_path}/azimuth.{raster_ext}')
+        rg_off_path = str(f'{offsets_path}/range.off')
+        az_off_path = str(f'{offsets_path}/azimuth.off')
 
-        rg_b_off_path = str(f'{offsets_b_path}/range.{raster_ext}')
-        az_b_off_path = str(f'{offsets_b_path}/azimuth.{raster_ext}')
+        rg_b_off_path = str(f'{offsets_b_path}/range.off')
+        az_b_off_path = str(f'{offsets_b_path}/azimuth.off')
 
         # create new offset directory in ionosphere scratch
         os.makedirs(offsets_b_path, exist_ok=True)
@@ -197,8 +202,15 @@ def decimate_freq_a_offset(iono_insar_cfg, original_dict):
                             data_shape=[rows_main, cols_output],
                             file_type='ENVI')
 
-def init_iono_attrs_datasets(iono_insar_cfg, input_runw, output_runw):
-    """create ionosphere layers (frequency B) in output RUNW if not exists
+def copy_iono_datasets(iono_insar_cfg,
+                        input_runw,
+                        output_runw,
+                        blocksize,
+                        oversample_flag=False,
+                        slant_main=None,
+                        slant_side=None):
+    """copy ionosphere layers (frequency B) to frequency A of RUNW product
+    with oversampling
 
     Parameters
     ----------
@@ -208,20 +220,37 @@ def init_iono_attrs_datasets(iono_insar_cfg, input_runw, output_runw):
         file path of frequency B RUNW
     output_runw :str
         file path of frequency A RUNW
+    oversample_flag: bool
+        bool option for oversample
+    slant_main : numpy.ndarray
+        slant range array of frequency A band
+    slant_side : numpy.ndarray
+        slant range array of frequency B band
+    oversample_flag : bool
     """
 
     iono_args = iono_insar_cfg['processing']['ionosphere_phase_correction']
     iono_freq_pols = iono_args['list_of_frequencies']
-    common_path = 'science/LSAR'
 
-    swath_path = f"/{common_path}/RUNW/swaths"
-    dest_freq_path = f"{swath_path}/frequencyA"
+    # Instantiate RUNW object to easily access RUNW datasets
+    runw_obj = RUNWGroupsPaths()
+    swath_path = runw_obj.SwathsPath
 
-    with h5py.File(input_runw, 'r') as src_h5, \
-        h5py.File(output_runw, 'a') as dst_h5:
+    if oversample_flag:
+        freq = 'A'
+    else:
         freq = 'B'
+
+    with HDF5OptimizedReader(name=input_runw, mode='a', libver='latest', swmr=True) as src_h5, \
+        HDF5OptimizedReader(name=output_runw, mode='a', libver='latest', swmr=True) as dst_h5:
+
         pol_list = iono_freq_pols['A']
         for pol in pol_list:
+            src_freq_path = f"{swath_path}/frequencyB"
+            src_pol_path = f"{src_freq_path}/interferogram/{pol}"
+            src_iono_path = f'{src_pol_path}/ionospherePhaseScreen'
+            src_iono_unct_path = f'{src_pol_path}/ionospherePhaseScreenUncertainty'
+
             dest_freq_path = f"{swath_path}/frequency{freq}"
             dest_pol_path = f"{dest_freq_path}/interferogram/{pol}"
             iono_path = f'{dest_pol_path}/ionospherePhaseScreen'
@@ -229,22 +258,23 @@ def init_iono_attrs_datasets(iono_insar_cfg, input_runw, output_runw):
 
             freq_path = f'{swath_path}/frequency{freq}'
             ifg_path = f'{swath_path}/frequency{freq}/interferogram'
+            target_array_str = f'HDF5:{input_runw}:/{src_iono_unct_path}'
+            target_slc_array = isce3.io.Raster(target_array_str)
+            rows_main = target_slc_array.length
+            cols_main = target_slc_array.width
 
             if ('frequencyB' in src_h5[swath_path]):
 
-                if('frequencyB' not in dst_h5[swath_path]):
-                    dst_h5[f'{swath_path}'].create_group(f'frequency{freq}')
-
                 if 'listOfPolarizations' not in dst_h5[freq_path]:
-                    h5_prep._add_polarization_list(dst_h5, 'RUNW', common_path, freq, pol)
-
+                    h5_prep._add_polarization_list(dst_h5, 'RUNW',
+                        CommonPaths().RootPath, freq, pol)
                 if 'interferogram' not in dst_h5[freq_path]:
                     dst_h5[freq_path].create_group('interferogram')
 
                 if pol not in dst_h5[ifg_path]:
                     dst_h5[ifg_path].create_group(pol)
 
-                if ('ionospherePhaseScreen' in src_h5[dest_pol_path]) and \
+                if ('ionospherePhaseScreen' in src_h5[src_pol_path]) and \
                     ('ionospherePhaseScreen' not in dst_h5[dest_pol_path]):
                     iono_shape = src_h5[iono_path].shape
                     grids_val = 'None'
@@ -252,7 +282,6 @@ def init_iono_attrs_datasets(iono_insar_cfg, input_runw, output_runw):
                     h5_prep._create_datasets(dst_h5[dest_pol_path],
                                     iono_shape, np.float32,
                                     'ionospherePhaseScreen',
-                                    chunks=(128, 128),
                                     descr=descr, units="radians",
                                     grids=grids_val,
                                     long_name='ionosphere phase screen')
@@ -260,12 +289,37 @@ def init_iono_attrs_datasets(iono_insar_cfg, input_runw, output_runw):
                     h5_prep._create_datasets(dst_h5[dest_pol_path],
                                     iono_shape, np.float32,
                                     'ionospherePhaseScreenUncertainty',
-                                    chunks=(128, 128),
                                     descr=descr, units="radians",
                                     grids=grids_val,
                                     long_name='ionosphere phase \
                                     screen uncertainty')
+                nblocks = int(np.ceil(rows_main / blocksize))
 
+                src_iono_paths = [src_iono_path, src_iono_unct_path]
+                dst_iono_paths = [iono_path, iono_unct_path]
+                for block in range(0, nblocks):
+                    row_start = block * blocksize
+                    if (row_start + blocksize > rows_main):
+                        block_rows_data = rows_main - row_start
+                    else:
+                        block_rows_data = blocksize
+
+                    for src_iono_path, dst_iono_path in zip(src_iono_paths, dst_iono_paths):
+                        iono = np.empty([block_rows_data, cols_main], dtype=float)
+                        src_h5[src_iono_path].read_direct(
+                            iono,
+                            np.s_[row_start : row_start + block_rows_data, :])
+                        if oversample_flag:
+                            iono = interpolate_freq_b_array(slant_main,
+                                                            slant_side,
+                                                            iono)
+                        dst_h5[dst_iono_path].write_direct(iono,
+                            dest_sel=np.s_[
+                                    row_start:row_start+block_rows_data, :])
+
+                # Add statistics to ionosphere datasets in RUNW
+                for dst_iono_path in dst_iono_paths:
+                    compute_stats_real_hdf5_dataset(dst_h5[dst_iono_path])
 
 def insar_ionosphere_pair(original_cfg, runw_hdf5):
     """Run insar workflow for additional interferogram to be used for ionosphere
@@ -329,6 +383,16 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
     iono_insar_cfg = original_cfg.copy()
     iono_insar_cfg['primary_executable'][
                 'product_type'] = 'RUNW'
+
+    # update processing parameter
+    # water mask for ionosphere is not supported now.
+    prep_wrapped_phase_cfg =  iono_insar_cfg['processing'][
+        'phase_unwrap']['preprocess_wrapped_phase']
+    unwrap_mask_type = prep_wrapped_phase_cfg['mask']['mask_type']
+
+    if unwrap_mask_type == 'water':
+        # Either set to a default value or delete the key entirely.
+        prep_wrapped_phase_cfg['enabled'] = False
 
     if iono_method == 'split_main_band':
         # For split_main_band, two sub-band interferograms need to be
@@ -409,6 +473,8 @@ def insar_ionosphere_pair(original_cfg, runw_hdf5):
             new_scratch = pathlib.Path(iono_path, f'{iono_method}')
             iono_insar_cfg['product_path_group'][
                 'scratch_path'] = new_scratch
+            iono_insar_cfg['processing']['geo2rdr'][
+                'topo_path'] = new_scratch
             iono_insar_cfg['product_path_group'][
                 'sas_output_file'] = f'{new_scratch}/RUNW.h5'
             iono_insar_cfg['processing']['dense_offsets'][
@@ -474,21 +540,18 @@ def run_insar_workflow(iono_insar_cfg, original_dict, out_paths):
     '''
 
     # run insar for ionosphere pairs
-    h5_prep.run(iono_insar_cfg)
+    prepare_insar_hdf5.run(iono_insar_cfg)
 
     iono_freq_pol =  iono_insar_cfg['processing']['input_subset'][
                     'list_of_frequencies']
     # decimate offsets for frequency B and create ionosphere layers
     if 'B' in iono_freq_pol:
         decimate_freq_a_offset(iono_insar_cfg, original_dict)
-        init_iono_attrs_datasets(iono_insar_cfg,
-                          out_paths['RUNW'],
-                          original_dict['output_runw'])
 
     if iono_insar_cfg['processing']['fine_resample']['enabled']:
-        resample_slc.run(iono_insar_cfg, 'fine')
+        resample_slc_v2.run(iono_insar_cfg, 'fine')
     else:
-        resample_slc.run(iono_insar_cfg, 'coarse')
+        resample_slc_v2.run(iono_insar_cfg, 'coarse')
 
     if iono_insar_cfg['processing']['fine_resample']['enabled']:
         crossmul.run(iono_insar_cfg, out_paths['RIFG'], 'fine')
@@ -518,6 +581,9 @@ def run(cfg: dict, runw_hdf5: str):
     info_channel = journal.info("ionosphere_phase_correction.run")
     info_channel.log("starting insar_ionosphere_correction")
 
+    # Instantiate RUNW object to easy access RUNW datasets
+    runw_obj = RUNWGroupsPaths()
+
     # pull parameters from dictionary
     iono_args = cfg['processing']['ionosphere_phase_correction']
     scratch_path = cfg['product_path_group']['scratch_path']
@@ -529,7 +595,7 @@ def run(cfg: dict, runw_hdf5: str):
     filter_cfg = iono_args['dispersive_filter']
 
     # pull parameters for dispersive filter
-    filter_bool =filter_cfg['enabled']
+    filter_bool = filter_cfg['enabled']
     mask_type = filter_cfg['filter_mask_type']
     filter_coh_thresh = filter_cfg['filter_coherence_threshold']
     kernel_range_size = filter_cfg['kernel_range']
@@ -542,8 +608,12 @@ def run(cfg: dict, runw_hdf5: str):
     unwrap_correction_bool = filter_cfg['unwrap_correction']
     rg_looks = cfg['processing']['crossmul']['range_looks']
     az_looks = cfg['processing']['crossmul']['azimuth_looks']
+    unwrap_rg_looks = cfg['processing']['phase_unwrap']['range_looks']
+    unwrap_az_looks = cfg['processing']['phase_unwrap']['azimuth_looks']
 
-    t_all = time.time()
+    if unwrap_rg_looks != 1 or unwrap_az_looks != 1:
+        rg_looks = unwrap_rg_looks
+        az_looks = unwrap_az_looks
 
     # set paths for ionosphere and split spectrum
     iono_path = os.path.join(scratch_path, 'ionosphere')
@@ -561,6 +631,7 @@ def run(cfg: dict, runw_hdf5: str):
     # for main and side bands for iono_freq_pols (main-side-bands)
     insar_ionosphere_pair(iono_insar_cfg, runw_hdf5)
 
+    t_all = time.time()
     # Define methods to use subband or sideband
     iono_method_subbands = ['split_main_band']
     iono_method_sideband = ['main_side_band', 'main_diff_ms_band']
@@ -653,8 +724,9 @@ def run(cfg: dict, runw_hdf5: str):
 
         # Set paths for upwrapped interferogram, coherence,
         # connected components and slant range
+        iono_output = runw_path_insar
         pol_comb_str = f"{pol_a}_{pol_a}"
-        swath_path = f"/science/LSAR/RUNW/swaths"
+        swath_path = runw_obj.SwathsPath
         dest_freq_path = f"{swath_path}/frequencyA"
         dest_pol_path = f"{dest_freq_path}/interferogram/{pol_a}"
         output_pol_path = dest_pol_path
@@ -709,6 +781,8 @@ def run(cfg: dict, runw_hdf5: str):
                     iono_method, 'RUNW.h5')
             else:
                 runw_freq_b_str = runw_path_insar
+            iono_output = runw_freq_b_str
+            iono_output_runw = runw_path_insar
 
             main_raster_str = f'HDF5:{runw_freq_a_str}:/{runw_path_freq_a}'
             main_runw_raster = isce3.io.Raster(main_raster_str)
@@ -728,9 +802,9 @@ def run(cfg: dict, runw_hdf5: str):
             del main_runw_raster
             del side_runw_raster
 
-            with h5py.File(runw_freq_a_str, 'r',
+            with HDF5OptimizedReader(name=runw_freq_a_str, mode='r',
                 libver='latest', swmr=True) as src_main_h5, \
-                h5py.File(runw_freq_b_str, 'r',
+                HDF5OptimizedReader(name=runw_freq_b_str, mode='r',
                 libver='latest', swmr=True) as src_side_h5:
 
                 # Read slant range block from HDF5
@@ -783,9 +857,9 @@ def run(cfg: dict, runw_hdf5: str):
                         [block_rows_data, cols_main],
                         dtype=float)
 
-                with h5py.File(sub_low_runw_str, 'r',
+                with HDF5OptimizedReader(name=sub_low_runw_str, mode='r',
                     libver='latest', swmr=True) as src_low_h5, \
-                    h5py.File(sub_high_runw_str, 'r',
+                    HDF5OptimizedReader(name=sub_high_runw_str, mode='r',
                     libver='latest', swmr=True) as src_high_h5:
 
                     # Read runw block for sub-bands
@@ -829,9 +903,9 @@ def run(cfg: dict, runw_hdf5: str):
                     side_conn_image = np.empty([block_rows_data, cols_side],
                         dtype=float)
 
-                with h5py.File(runw_freq_a_str, 'r',
+                with HDF5OptimizedReader(name=runw_freq_a_str, mode='r',
                     libver='latest', swmr=True) as src_main_h5, \
-                    h5py.File(runw_freq_b_str, 'r',
+                    HDF5OptimizedReader(name=runw_freq_b_str, mode='r',
                     libver='latest', swmr=True) as src_side_h5:
 
                     # Read runw block for main and side bands
@@ -925,7 +999,7 @@ def run(cfg: dict, runw_hdf5: str):
             # at this point.
             if not filter_bool:
                 iono_hdf5_path = f'{output_pol_path}/ionospherePhaseScreen'
-                write_disp_block_hdf5(runw_path_insar,
+                write_disp_block_hdf5(iono_output,
                     iono_hdf5_path,
                     dispersive,
                     rows_output,
@@ -933,11 +1007,22 @@ def run(cfg: dict, runw_hdf5: str):
 
                 iono_sig_hdf5_path = \
                     f'{output_pol_path}/ionospherePhaseScreenUncertainty'
-                write_disp_block_hdf5(runw_path_insar,
+                write_disp_block_hdf5(iono_output,
                     iono_sig_hdf5_path,
                     iono_std,
                     rows_output,
                     row_start)
+                # oversample ionosphere of frequencyB to frequencyA
+                # and copy them to standard RUNW product.
+                if iono_method in iono_method_sideband:
+                    copy_iono_datasets(iono_insar_cfg,
+                        input_runw=iono_output,
+                        output_runw=iono_output_runw,
+                        blocksize=blocksize,
+                        oversample_flag=True,
+                        slant_main=main_slant,
+                        slant_side=side_slant)
+
             else:
                 info_channel.log(f'{mask_type} is used for mask construction')
                 if mask_type == "coherence":
@@ -979,7 +1064,7 @@ def run(cfg: dict, runw_hdf5: str):
             # if unwrapping correction technique is not requested,
             # save output to hdf5 at this point
             if not unwrap_correction_bool:
-                with h5py.File(runw_path_insar, 'a', libver='latest', swmr=True) as dst_h5:
+                with HDF5OptimizedReader(name=iono_output, mode='a', libver='latest', swmr=True) as dst_h5:
                     iono_hdf5_path = dst_h5[f'{output_pol_path}/ionospherePhaseScreen']
                     iono_sig_hdf5_path = \
                         dst_h5[f'{output_pol_path}/ionospherePhaseScreenUncertainty']
@@ -992,6 +1077,16 @@ def run(cfg: dict, runw_hdf5: str):
                         filtered_output=iono_hdf5_path,
                         filtered_std_dev=iono_sig_hdf5_path,
                         lines_per_block=blocksize)
+                # oversample ionosphere of frequencyB to frequencyA
+                # and copy them to standard RUNW product.
+                if iono_method in iono_method_sideband:
+                    copy_iono_datasets(iono_insar_cfg,
+                        input_runw=iono_output,
+                        output_runw=iono_output_runw,
+                        blocksize=blocksize,
+                        oversample_flag=True,
+                        slant_main=main_slant,
+                        slant_side=side_slant)
             else:
                 filt_disp_path = os.path.join(
                     iono_path, iono_method, pol_comb_str, 'filt_dispersive')
@@ -1052,9 +1147,9 @@ def run(cfg: dict, runw_hdf5: str):
                         sub_high_image = np.empty([block_rows_data, cols_main],
                             dtype=float)
 
-                        with h5py.File(sub_low_runw_str, 'r',
+                        with HDF5OptimizedReader(name=sub_low_runw_str, mode='r',
                             libver='latest', swmr=True) as src_low_h5, \
-                            h5py.File(sub_high_runw_str, 'r',
+                            HDF5OptimizedReader(name=sub_high_runw_str, mode='r',
                             libver='latest', swmr=True) as src_high_h5:
 
                             # Read runw block for sub-bands
@@ -1072,9 +1167,9 @@ def run(cfg: dict, runw_hdf5: str):
                         side_image = np.empty([block_rows_data, cols_side],
                             dtype=float)
 
-                        with h5py.File(runw_freq_a_str, 'r',
+                        with HDF5OptimizedReader(name=runw_freq_a_str, mode='r',
                             libver='latest', swmr=True) as src_main_h5, \
-                            h5py.File(runw_freq_b_str, 'r',
+                            HDF5OptimizedReader(name=runw_freq_b_str, mode='r',
                             libver='latest', swmr=True) as src_side_h5:
 
                             # Read runw block for main and side bands
@@ -1124,7 +1219,7 @@ def run(cfg: dict, runw_hdf5: str):
                         block_row=row_start,
                         data_shape=[rows_output, cols_output])
 
-                with h5py.File(runw_path_insar, 'a', libver='latest', swmr=True) as dst_h5:
+                with HDF5OptimizedReader(name=iono_output, mode='a', libver='latest', swmr=True) as dst_h5:
                     iono_hdf5_path = dst_h5[f'{output_pol_path}/ionospherePhaseScreen']
                     iono_sig_hdf5_path = \
                         dst_h5[f'{output_pol_path}/ionospherePhaseScreenUncertainty']
@@ -1136,6 +1231,17 @@ def run(cfg: dict, runw_hdf5: str):
                         filtered_output=iono_hdf5_path,
                         filtered_std_dev=iono_sig_hdf5_path,
                         lines_per_block=blocksize)
+                # oversample ionosphere of frequencyB to frequencyA
+                # and copyt them to standard RUNW product.
+                if iono_method in iono_method_sideband:
+                    copy_iono_datasets(iono_insar_cfg,
+                        input_runw=iono_output,
+                        output_runw=iono_output_runw,
+                        blocksize=blocksize,
+                        oversample_flag=True,
+                        slant_main=main_slant,
+                        slant_side=side_slant)
+
 
     t_all_elapsed = time.time() - t_all
     info_channel.log(f"successfully ran Ionosphere in {t_all_elapsed:.3f} seconds")

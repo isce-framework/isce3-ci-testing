@@ -11,9 +11,9 @@ from osgeo import gdal
 
 import journal
 import isce3
+from isce3.core import crop_external_orbit
 from nisar.products.readers import SLC
 from nisar.products.readers.orbit import load_orbit_from_xml
-from nisar.workflows import runconfig
 from nisar.workflows.rdr2geo_runconfig import Rdr2geoRunConfig
 from nisar.workflows.yaml_argparse import YamlArgparse
 
@@ -36,7 +36,7 @@ def run(cfg):
     # pull parameters from cfg
     input_hdf5 = cfg['input_file_group']['reference_rslc_file']
     dem_file = cfg['dynamic_ancillary_file_group']['dem_file']
-    ref_orbit = cfg['dynamic_ancillary_file_group']['orbit']['reference_orbit_file']
+    ref_orbit = cfg['dynamic_ancillary_file_group']['orbit_files']['reference_orbit_file']
     scratch_path = pathlib.Path(cfg['product_path_group']['scratch_path'])
     freq_pols = cfg['processing']['input_subset']['list_of_frequencies']
     threshold = cfg['processing']['rdr2geo']['threshold']
@@ -46,10 +46,14 @@ def run(cfg):
 
     # get params from SLC
     slc = SLC(hdf5file=input_hdf5)
+
+    # Get orbit
+    orbit = slc.getOrbit()
     if ref_orbit is not None:
-        orbit = load_orbit_from_xml(ref_orbit)
-    else:
-        orbit = slc.getOrbit()
+        # SLC will get first radar grid whose frequency is available.
+        # Reference epoch and orbit have no frequency dependency.
+        external_orbit = load_orbit_from_xml(ref_orbit, slc.getRadarGrid().ref_epoch)
+        orbit = crop_external_orbit(external_orbit, orbit)
 
     # set defaults shared by both frequencies
     dem_raster = isce3.io.Raster(dem_file)
@@ -116,11 +120,12 @@ def run(cfg):
             heading_raster, local_incidence_raster, local_psi_raster,\
             simulated_amplitude_raster, shadow_raster = raster_list
 
-        # run topo
+        # run topo - with east and north unit vector components of ground to
+        # satellite layers permanently disabled.
         rdr2geo_obj.topo(dem_raster, x_raster, y_raster, height_raster,
                          incidence_raster, heading_raster, local_incidence_raster,
                          local_psi_raster, simulated_amplitude_raster,
-                         shadow_raster)
+                         shadow_raster, None, None)
 
         # remove undesired/None rasters from raster list
         raster_list = [raster for raster in raster_list if raster is not None]

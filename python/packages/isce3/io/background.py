@@ -1,7 +1,7 @@
 import abc
 import logging
 from queue import Queue, Empty
-from threading import Thread, Event
+from threading import Thread, Event, main_thread
 
 log = logging.getLogger("isce3.io.background")
 
@@ -49,7 +49,10 @@ class BackgroundWorker(abc.ABC):
         self._thread.start()
 
     def _consume_work_queue(self):
-        while not self._finished_event.is_set():
+        # Second check is to ensure the main thread wasn't interrupted/killed,
+        # which would leave background workers hanging indefinitely
+        # https://docs.python.org/3/library/threading.html#threading.main_thread
+        while not self._finished_event.is_set() and main_thread().is_alive():
             log.debug("getting work")
             try:
                 args, kw = self._work_queue.get(timeout=self.timeout)
@@ -62,6 +65,7 @@ class BackgroundWorker(abc.ABC):
             if self.store_results:
                 log.debug("saving result in queue")
                 self._results_queue.put(result)
+            self._work_queue.task_done()
 
     @abc.abstractmethod
     def process(self, *args, **kw):
@@ -95,6 +99,7 @@ class BackgroundWorker(abc.ABC):
         all work has been processed.  If `store_results=True` also block until
         all results have been retrieved.
         """
+        self._work_queue.join()
         self._finished_event.set()
         self._results_queue.join()
         self._thread.join()

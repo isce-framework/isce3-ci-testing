@@ -13,7 +13,7 @@ import isce3
 from nisar.products.readers import SLC
 from nisar.workflows import geogrid
 import nisar.workflows.helpers as helpers
-
+from nisar.products.readers.orbit import load_orbit_from_xml
 
 class RunConfig:
     def __init__(self, args, workflow_name=''):
@@ -73,8 +73,10 @@ class RunConfig:
             with open(self.args.run_config_path) as f_yaml:
                 self.user = parser.load(f_yaml)
 
-        # copy user suppiled config into default config
-        helpers.deep_update(self.cfg, self.user)
+        # copy user supplied config into default config
+        flag_none_is_valid = self.workflow_name not in ['gcov', 'gslc']
+
+        helpers.deep_update(self.cfg, self.user, flag_none_is_valid)
 
     def load_geocode_yaml_to_dict(self):
         '''
@@ -101,6 +103,9 @@ class RunConfig:
         else:
             self.args.restart = True
 
+        if self.workflow_name in ['gcov', 'gslc']:
+            return
+
         # remove default frequency(s) if not chosen by user
         default_freqs = self.cfg['processing']['input_subset']['list_of_frequencies']
         user_freqs = self.user['processing']['input_subset']['list_of_frequencies'].keys()
@@ -123,7 +128,7 @@ class RunConfig:
         elif self.workflow_name == 'insar':
             rslc_keys = ['reference_rslc_file', 'secondary_rslc_file']
 
-            orbit_group = self.cfg['dynamic_ancillary_file_group']['orbit']
+            orbit_group = self.cfg['dynamic_ancillary_file_group']['orbit_files']
             orbit_keys = ['reference_orbit_file', 'secondary_orbit_file']
         else:
             err_str = f'{self.workflow_name} unsupported'
@@ -170,6 +175,13 @@ class RunConfig:
 
         slc = SLC(hdf5file=input_path)
 
+        # if freq_pols is empty, process all frequencies and polarizations
+        if freq_pols is None:
+            self.cfg['processing']['input_subset']['list_of_frequencies'] = \
+                slc.polarizations
+            return
+
+        # otherwise, check contents of freq_pols
         for freq in freq_pols.keys():
             if freq not in slc.frequencies:
                 err_str = f"Frequency {freq} invalid; not found in source frequencies."
@@ -191,11 +203,39 @@ class RunConfig:
                     error_channel.log(err_str)
                     raise ValueError(err_str)
 
+
+    def check_temporal_coverage(self):
+        # Check the temporal coverage of radargrid, orbit, and TEC (if provided)
+        if self.workflow_name == 'insar':
+            input_path = self.cfg['input_file_group']['reference_rslc_file']
+            orbit_path = self.cfg['dynamic_ancillary_file_group']['orbit_files']['reference_orbit_file']
+        else:
+            input_path = self.cfg['input_file_group']['input_file_path']
+            orbit_path = self.cfg['dynamic_ancillary_file_group']['orbit_file']
+        freq_pols = self.cfg['processing']['input_subset']['list_of_frequencies']
+        tec_path = self.cfg['dynamic_ancillary_file_group']['tec_file']
+        
+        slc = SLC(hdf5file=input_path)
+
+        if orbit_path is not None:
+            # slc will get first radar grid whose frequency is available.
+            # orbit has not frequency dependency.
+            orbit = load_orbit_from_xml(orbit_path,
+                                        slc.getRadarGrid().ref_epoch)
+        else:
+            orbit = slc.getOrbit()
+
+        for freq, _ in freq_pols.items():
+            radar_grid = slc.getRadarGrid(freq)
+            helpers.check_radargrid_orbit_tec(radar_grid, orbit, tec_path)
+
+
     def prep_geocode_cfg(self):
         '''
         check geocode config and initialize as needed
         '''
         geocode_dict = self.cfg['processing']['geocode']
+        error_channel = journal.error('RunConfig.prep_geocode_cfg')
 
         # check for user provided EPSG and grab from DEM if none provided
         if geocode_dict['output_epsg'] is None:
@@ -204,63 +244,118 @@ class RunConfig:
         # make geogrids for each frequency
         geogrids = {}
 
+        has_wrapped_igram_geogrids = self.workflow_name not in ['gcov', 'gslc']
+        wrapped_igram_geogrids = {}
+
         # for each frequency check source RF polarization values and make geogrids
         freq_pols = self.cfg['processing']['input_subset']['list_of_frequencies']
         for freq in freq_pols.keys():
             # build geogrids only if pols not None
             geogrids[freq] = geogrid.create(self.cfg, self.workflow_name, freq)
+            if has_wrapped_igram_geogrids:
+                wrapped_igram_geogrids[freq] = geogrid.create(
+                    self.cfg, self.workflow_name, freq,
+                    is_geo_wrapped_igram=True)
 
         # place geogrids in cfg for later processing
         self.cfg['processing']['geocode']['geogrids'] = geogrids
+        if not has_wrapped_igram_geogrids:
+            return
+        self.cfg['processing']['geocode']['wrapped_igram_geogrids'] = wrapped_igram_geogrids
 
-    def prep_cubes_geocode_cfg(self):
+
+    def prep_geocode_metadata(self, group_name, workflow_name,
+                              flag_cube=False):
         '''
-        check cubes geocode config and initialize as needed
+        check metadata groups config (radar_grid_cubes,
+        calibration_information, or processing_information) and
+        initialize as needed.
 
-        radar_grid_cubes is an optional group. If not provided,
-        the geocode group should be used, but with different X and Y
+        Metadata groups are optional. If not provided, the geocode
+        group should be used instead, but with coarser X and Y
         spacing defaults
         '''
-        geocode_dict = self.cfg['processing']['geocode']
+        metadata_dict = self.cfg['processing']['geocode'].copy()
 
-        # check for user provided EPSG and grab geocode group EPSG if not provided
+        del metadata_dict['output_posting']
+        metadata_user_dict = self.cfg['processing'][group_name]
 
-        if self.cfg['processing']['radar_grid_cubes']['output_epsg'] is None:
-            cubes_epsg = geocode_dict['output_epsg']
+        # copy user suppiled config into default config
+        helpers.deep_update(metadata_dict, metadata_user_dict)
+
+        # check for user provided EPSG and grab geocode group EPSG if not
+        # provided
+        if ('output_epsg' not in self.cfg['processing'][group_name].keys() or
+                self.cfg['processing'][group_name]['output_epsg'] is None):
+            metadata_epsg = self.cfg['processing']['geocode']['output_epsg']
         else:
-            cubes_epsg = self.cfg['processing']['radar_grid_cubes']['output_epsg']
+            metadata_epsg = self.cfg['processing'][group_name]['output_epsg']
 
-        self.cfg['processing']['radar_grid_cubes']['output_epsg'] = cubes_epsg
+        assert metadata_epsg is not None
 
-        if not self.cfg['processing']['radar_grid_cubes']['heights']:
-            self.cfg['processing']['radar_grid_cubes']['heights'] = \
+        self.cfg['processing'][group_name]['output_epsg'] = metadata_epsg
+        metadata_dict['output_epsg'] = metadata_epsg
+
+        # Set default values for heights
+        if flag_cube and (
+            'heights' not in self.cfg['processing'][group_name].keys() or
+                not self.cfg['processing'][group_name]['heights']):
+            self.cfg['processing'][group_name]['heights'] = \
                 list(np.arange(-1000, 9001, 500))
 
-        if cubes_epsg == 4326:
+        # Set default values for metadata geogrid posting
+        if metadata_epsg == 4326 and flag_cube:
             # lat/lon
-            default_cube_geogrid_spacing_x = 0.005
-            default_cube_geogrid_spacing_y = -0.005
+            default_metadata_geogrid_spacing_x = 0.005
+            default_metadata_geogrid_spacing_y = -0.005
+        if metadata_epsg == 4326:
+            # lat/lon
+            default_metadata_geogrid_spacing_x = 0.01
+            default_metadata_geogrid_spacing_y = -0.01
+        elif flag_cube:
+            # meters
+            default_metadata_geogrid_spacing_x = 500
+            default_metadata_geogrid_spacing_y = -500
         else:
             # meters
-            default_cube_geogrid_spacing_x = 500
-            default_cube_geogrid_spacing_y = -500
+            default_metadata_geogrid_spacing_x = 1000
+            default_metadata_geogrid_spacing_y = -1000
 
-        radar_grid_cubes_dict = self.cfg['processing']['radar_grid_cubes']
-        self.cfg['processing']['radar_grid_cubes']['output_epsg'] = cubes_epsg
+        # Set actual values for metadata geogrid posting
+        if 'output_posting' not in metadata_dict.keys():
+            metadata_dict['output_posting'] = {'x_posting': None,
+                                               'y_posting': None}
 
-        # build geogrid
-        frequency_ref = 'A'
-        frequency_group = None
-        cubes_geogrid = geogrid.create(
-            self.cfg, self.workflow_name,
-            frequency_group=frequency_group,
-            frequency=frequency_ref,
-            geocode_dict=radar_grid_cubes_dict,
-            default_spacing_x=default_cube_geogrid_spacing_x,
-            default_spacing_y=default_cube_geogrid_spacing_y)
+        if metadata_dict['output_posting']['x_posting'] is None:
+            metadata_dict['output_posting']['x_posting'] = \
+                default_metadata_geogrid_spacing_x
+        if metadata_dict['output_posting']['y_posting'] is None:
+            metadata_dict['output_posting']['y_posting'] = \
+                abs(default_metadata_geogrid_spacing_y)
+
+        # Set snap values equal to the metdata geogrid posting
+        metadata_dict['x_snap'] = metadata_dict['output_posting']['x_posting']
+        metadata_dict['y_snap'] = metadata_dict['output_posting']['y_posting']
+
+        # use the first available product geogrid as reference for creating
+        # the metadata cubes geogrid
+        geogrids_ref = self.cfg['processing']['geocode']['geogrids']
+        geogrid_ref = geogrids_ref[list(geogrids_ref.keys())[0]]
+
+        # construct geogrid
+        metadata_geogrid = geogrid.create(
+            self.cfg,
+            workflow_name=workflow_name,
+            frequency_group=None,
+            frequency=None,
+            geocode_dict=metadata_dict,
+            default_spacing_x=default_metadata_geogrid_spacing_x,
+            default_spacing_y=default_metadata_geogrid_spacing_y,
+            flag_metadata_cubes=flag_cube,
+            geogrid_ref=geogrid_ref)
 
         # place geogrid in cfg for later processing
-        self.cfg['processing']['radar_grid_cubes']['geogrid'] = cubes_geogrid
+        self.cfg['processing'][group_name]['geogrid'] = metadata_geogrid
 
     def geocode_common_arg_load(self):
         '''
@@ -268,5 +363,15 @@ class RunConfig:
         '''
         self.prep_paths()
         self.prep_frequency_and_polarizations()
+        self.check_temporal_coverage()
         self.prep_geocode_cfg()
-        self.prep_cubes_geocode_cfg()
+        self.prep_geocode_metadata('radar_grid_cubes',
+                                   workflow_name=self.workflow_name,
+                                   flag_cube=True)
+        if self.workflow_name != 'gcov' and self.workflow_name != 'gslc':
+            return
+
+        self.prep_geocode_metadata('calibration_information',
+                                   workflow_name=self.workflow_name)
+        self.prep_geocode_metadata('processing_information',
+                                   workflow_name=self.workflow_name)

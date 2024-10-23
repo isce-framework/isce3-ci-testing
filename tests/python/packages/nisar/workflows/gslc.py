@@ -2,10 +2,18 @@
 import argparse
 import os
 
-from nisar.workflows import defaults, gslc, h5_prep
+import numpy as np
+import pytest
+import isce3.ext.isce3 as isce3
+from nisar.workflows import gslc
 from nisar.workflows.gslc_runconfig import GSLCRunConfig
+from nisar.products.writers import GslcWriter
+from nisar.products.readers import GSLC, RSLC
+from osgeo import gdal
+import h5py
 
 import iscetest
+
 
 def test_run():
     '''
@@ -27,16 +35,124 @@ def test_run():
     runconfig = GSLCRunConfig(args)
     runconfig.geocode_common_arg_load()
 
+    # disable generation and application of TEC and SET corrections
+    for corr_type in ["tec", "solid_earth_tides"]:
+        corr_key = f"{corr_type}_enabled"
+        runconfig.cfg["processing"]["correction_luts"][corr_key] = False
+
     # geocode same 2 rasters as C++/pybind geocodeSlc
     for xy in ['x', 'y']:
         # adjust runconfig to match just created raster
-        runconfig.cfg['product_path_group']['sas_output_file'] = f'{xy}_out.h5'
+        sas_output_file = f'{xy}_out.h5'
+        runconfig.cfg['product_path_group']['sas_output_file'] = \
+            sas_output_file
 
-        # prepare output hdf5
-        h5_prep.run(runconfig.cfg)
+        partial_granule_id = \
+            ('NISAR_L2_PR_GSLC_105_091_D_006_{MODE}_{POLE}_A'
+                '_{StartDateTime}_{EndDateTime}_D00344_P_P_J_001.h5')
+        expected_granule_id = \
+            ('NISAR_L2_PR_GSLC_105_091_D_006_1600_SHNA_A'
+                '_20030226T175530_20030226T175531_D00344_P_P_J_001.h5')
+        runconfig.cfg['primary_executable']['partial_granule_id'] = \
+            partial_granule_id
+
+        if os.path.isfile(sas_output_file):
+            os.remove(sas_output_file)
 
         # geocode test raster
         gslc.run(runconfig.cfg)
+
+        with GslcWriter(runconfig=runconfig) as gslc_obj:
+            gslc_obj.populate_metadata()
+            assert gslc_obj.granule_id == expected_granule_id
+
+            doppler_centroid_lut_path = (
+                '/science/LSAR/GSLC/metadata/sourceData/'
+                'processingInformation/parameters/frequencyA/'
+                'dopplerCentroid')
+
+            # verify that Doppler Centroid LUT in radar coordinates
+            # is saved into the GSLC product
+            assert doppler_centroid_lut_path in gslc_obj.output_hdf5_obj
+
+        # assert that the metadata cubes geogrid is larger than the
+        # GSLC images by a margin
+        hh_ref = (f'NETCDF:{sas_output_file}://science/LSAR/GSLC/'
+                  'grids/frequencyA/HH')
+        hh_xmin, hh_xmax, hh_ymin, hh_ymax, _, _ = get_raster_geogrid(hh_ref)
+
+        metadata_cubes_ref = (
+            f'NETCDF:{sas_output_file}://science/LSAR/GSLC'
+            '/metadata/radarGrid/incidenceAngle')
+        cubes_xmin, cubes_xmax, cubes_ymin, cubes_ymax, cubes_dx, \
+            cubes_dy = get_raster_geogrid(metadata_cubes_ref)
+
+        # we should have a margin of at least 5 metadata cubes pixels
+        margin_x = 5 * cubes_dx
+        margin_y = 5 * abs(cubes_dy)
+
+        # hh_xmin needs to start after cubes_xmin
+        assert (hh_xmin - cubes_xmin > margin_x)
+
+        # hh_xmax needs to end before cubes_xmax
+        assert (cubes_xmax - hh_xmax > margin_x)
+
+        # hh_ymin needs to start after cubes_ymin
+        assert (hh_ymin - cubes_ymin > margin_y)
+
+        # hh_ymax needs to end before cubes_ymax
+        assert (cubes_ymax - hh_ymax > margin_y)
+
+        gslc_product = GSLC(hdf5file=sas_output_file)
+        gslc_doppler_centroid_lut = gslc_product.getDopplerCentroid()
+        assert isinstance(gslc_doppler_centroid_lut, isce3.core.LUT2d)
+
+        # The GSLC Doppler Centroid LUT in radar coordiantes must match
+        # the RSLC Doppler Centroid LUT
+        rslc_product = RSLC(hdf5file=f'{iscetest.data}/envisat.h5')
+        rslc_doppler_centroid_lut = rslc_product.getDopplerCentroid()
+
+        assert np.array_equal(gslc_doppler_centroid_lut.data,
+                              rslc_doppler_centroid_lut.data)
+
+        lut_attributes_to_check_list = ['length', 'width',
+                                        'y_spacing', 'x_spacing',
+                                        'y_start', 'x_start']
+
+        for attr in lut_attributes_to_check_list:
+            assert (gslc_doppler_centroid_lut.__getattribute__(attr) ==
+                    rslc_doppler_centroid_lut.__getattribute__(attr))
+
+        output_h5_obj = h5py.File(sas_output_file, 'r')
+        
+        zero_doppler_time_dataset = \
+            output_h5_obj['//science/LSAR/GSLC/metadata/sourceData/'
+                            'processingInformation/parameters/zeroDopplerTime']
+        
+        assert 'units' in zero_doppler_time_dataset.attrs.keys()
+
+        assert zero_doppler_time_dataset.attrs['units'].decode().startswith(
+            'seconds since ')
+
+        assert zero_doppler_time_dataset.attrs['description'].decode() == \
+            ('Zero doppler time dimension corresponding to source data'
+                ' processing information records')
+
+
+def get_raster_geogrid(dataset_reference):
+    gdal_ds = gdal.Open(dataset_reference, gdal.GA_ReadOnly)
+    geotransform = gdal_ds.GetGeoTransform()
+    length = gdal_ds.RasterYSize
+    width = gdal_ds.RasterXSize
+
+    dx = geotransform[1]
+    dy = geotransform[5]
+    xmin = geotransform[0]
+    xmax = geotransform[0] + width * dx
+    ymax = geotransform[3]
+    ymin = geotransform[3] + length * dy
+
+    return xmin, xmax, ymin, ymax, dx, dy
 
 
 if __name__ == '__main__':

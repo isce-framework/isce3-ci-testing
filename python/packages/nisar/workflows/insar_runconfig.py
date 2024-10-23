@@ -1,16 +1,12 @@
+import os
 import warnings
 
-import os
-import h5py
 import journal
-import numpy as np
-
-from nisar.products.readers import SLC
 from nisar.workflows.geo2rdr_runconfig import Geo2rdrRunConfig
-import nisar.workflows.helpers as helpers
-
-from nisar.workflows.troposphere_runconfig import troposphere_delay_check
+from nisar.workflows.geocode_insar_runconfig import geocode_insar_cfg_check
 from nisar.workflows.ionosphere_runconfig import ionosphere_cfg_check
+from nisar.workflows.troposphere_runconfig import troposphere_delay_check
+
 
 class InsarRunConfig(Geo2rdrRunConfig):
     def __init__(self, args):
@@ -62,7 +58,7 @@ class InsarRunConfig(Geo2rdrRunConfig):
                 # Raise and log warning
                 warning_str = f'{write_flag} incorrectly disabled for rdr2geo; it will be enabled'
                 warning_channel.log(warning_str)
-                warning.warn(warning_str)
+                warnings.warn(warning_str)
 
                 # Set write flag True
                 self.cfg['processing']['rdr2geo'][write_flag] = True
@@ -82,6 +78,18 @@ class InsarRunConfig(Geo2rdrRunConfig):
             warning_channel.log('Dense offsets and offsets product both enabled'
                                 'switching off offsets product and run dense offsets')
             self.cfg['processing']['offsets_product']['enabled'] = False
+
+        # If either dense_offsets and offsets_product are enabled and process
+        # single co-pol for offsets enabled, check if co-pol values exist
+        co_pol_set = {'HH', 'VV'}
+        if (self.cfg['processing']['offsets_product']['enabled'] or \
+            self.cfg['processing']['dense_offsets']['enabled']) and \
+                self.cfg['processing']['process_single_co_pol_offset']:
+            for freq, pol_list in freq_pols.items():
+                if not set(pol_list).intersection(co_pol_set):
+                    err_str = f"Frequency {freq} has no co-pol when single co-pol offset mode enabled"
+                    error_channel.log(err_str)
+                    raise ValueError(err_str)
 
         if self.cfg['processing']['dense_offsets']['coregistered_slc_path'] is None:
             self.cfg['processing']['dense_offsets'][
@@ -143,13 +151,13 @@ class InsarRunConfig(Geo2rdrRunConfig):
             # Otherwise check that mask for individual freq/pols are correctly assigned
             for freq, pol_list in freq_pols.items():
                 if freq in mask_options:
-                   for pol in pol_list:
-                       if pol in mask_options[freq]:
-                          mask_file = mask_options[freq][pol]
-                          if mask_file is not None and not os.path.isfile(mask_file):
-                             err_str = f"{mask_file} is invalid; needs to be a file"
-                             error_channel.log(err_str)
-                             raise ValueError(err_str)
+                    for pol in pol_list:
+                        if pol in mask_options[freq]:
+                            mask_file = mask_options[freq][pol]
+                            if mask_file is not None and not os.path.isfile(mask_file):
+                                err_str = f"{mask_file} is invalid; needs to be a file"
+                                error_channel.log(err_str)
+                                raise ValueError(err_str)
 
         # Check filter_type and if not allocated, create a default cfg dictionary
         # filter_type will be present at runtime because is allocated in share/nisar/defaults
@@ -202,44 +210,8 @@ class InsarRunConfig(Geo2rdrRunConfig):
         if iono_cfg['enabled']:
             ionosphere_cfg_check(self.cfg)
 
-
-        if 'interp_method' not in self.cfg['processing']['geocode']:
-            self.cfg['processing']['geocode']['interp_method'] = 'BILINEAR'
-
-        # create empty dict if geocode_datasets not in geocode
-        for datasets in ['gunw_datasets', 'goff_datasets']:
-            if datasets not in self.cfg['processing']['geocode']:
-                self.cfg['processing']['geocode'][datasets] = {}
-
-        # Initialize GUNW and GOFF names
-        gunw_datasets = ['connected_components', 'coherence_magnitude',
-                         'ionosphere_phase_screen',
-                         'ionosphere_phase_screen_uncertainty',
-                         'unwrapped_phase', 'along_track_offset',
-                         'slant_range_offset', 'layover_shadow_mask']
-        goff_datasets = ['along_track_offset', 'snr',
-                         'along_track_offset_variance',
-                         'correlation_surface_peak', 'cross_offset_variance',
-                         'slant_range_offset', 'slant_range_offset_variance']
-        # insert both geocode datasets in dict keyed on datasets name
-        geocode_datasets = {'gunw_datasets': gunw_datasets,
-                            'goff_datasets': goff_datasets}
-        for dataset_group in geocode_datasets:
-            for dataset in geocode_datasets[dataset_group]:
-                if dataset not in self.cfg['processing']['geocode'][
-                    dataset_group]:
-                    self.cfg['processing']['geocode'][dataset_group][
-                        dataset] = True
-
-        # Check if layover shadow output enabled
-        if not self.cfg['processing']['rdr2geo']['write_layover_shadow']:
-            # Raise and log warning
-            warning_str = 'layover_shadow incorrectly disabled for rdr2geo; it will be enabled'
-            warning_channel.log(warning_str)
-            warning.warn(warning_str)
-
-            # Set write flag True
-            self.cfg['processing']['rdr2geo']['write_layover_shadow'] = True
+        # Check geocode_insar config options
+        geocode_insar_cfg_check(self.cfg)
 
         # Check the troposphere delay
         troposphere_delay_check(self.cfg)

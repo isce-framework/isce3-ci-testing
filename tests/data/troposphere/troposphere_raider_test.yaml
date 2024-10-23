@@ -12,7 +12,7 @@ runconfig:
         dynamic_ancillary_file_group:
             # REQUIRED - Use the provided DEM as input
             dem_file: troposphere/dem.tif
-            troposphere_weather_model:
+            troposphere_weather_model_files:
                reference_troposphere_file: troposphere/raider_weather_model/ERA-5_2012_04_19_T16_37_23_38N_40N_124W_122W.nc
                secondary_troposphere_file: troposphere/raider_weather_model/ERA-5_2012_11_05_T22_48_18_38N_40N_124W_122W.nc
 
@@ -85,6 +85,7 @@ runconfig:
 
             coarse_resample:
                 lines_per_tile: 1000
+                columns_per_tile: 1000
 
             dense_offsets:
                 enabled: False
@@ -169,7 +170,12 @@ runconfig:
                 package: raider
                 weather_model_type: ERA5
                 delay_direction: zenith
-                delay_product: comb
+                enable_wet_product: False
+                enable_hydrostatic_product: False
+                enable_comb_product: True
+        output:
+          compression_enabled: False
+          chunk_size: [ 16, 16 ]
 
         # TODO OPTIONAL - To setup type of worker
         worker:

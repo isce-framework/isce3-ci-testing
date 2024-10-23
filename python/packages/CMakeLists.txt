@@ -26,6 +26,8 @@ endforeach()
 # XXX Make workflow scripts executable.
 set (list_of_exe
      nisar/workflows/crossmul.py
+     nisar/workflows/estimate_abscal_factor.py
+     nisar/workflows/faraday_rot_angle_from_rslc.py
      nisar/workflows/focus.py
      nisar/workflows/gen_el_rising_edge_product.py
      nisar/workflows/gen_el_null_range_product.py
@@ -35,9 +37,13 @@ set (list_of_exe
      nisar/workflows/get_product_geometry.py
      nisar/workflows/gcov.py
      nisar/workflows/gslc.py
+     nisar/workflows/gslc_point_target_analysis.py
      nisar/workflows/insar.py
+     nisar/workflows/nisar_l0b_dm1_to_science.py
+     nisar/workflows/nisar_l0b_dm2_to_dbf.py
      nisar/workflows/noise_estimator.py
      nisar/workflows/point_target_analysis.py
+     nisar/workflows/pol_channel_imbalance_from_rslc.py
      nisar/workflows/rdr2geo.py
      nisar/workflows/resample_slc.py
      nisar/workflows/stage_dem.py

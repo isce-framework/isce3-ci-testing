@@ -17,6 +17,7 @@ core/DateTime.cpp
 core/Ellipsoid.cpp
 core/EulerAngles.cpp
 core/Interp1d.cpp
+core/Interp2d.cpp
 core/Kernels.cpp
 core/Linspace.cpp
 core/LookSide.cpp
@@ -30,6 +31,7 @@ core/StateVector.cpp
 core/TimeDelta.cpp
 core/Poly1d.cpp
 core/Poly2d.cpp
+core/xyzToEnu.cpp
 focus/Backproject.cpp
 focus/Chirp.cpp
 focus/DryTroposphereModel.cpp
@@ -43,8 +45,11 @@ geometry/DEMInterpolator.cpp
 geocode/GeocodeCov.cpp
 geocode/GeocodePolygon.cpp
 geometry/geometry.cpp
+geometry/getGeolocationGrid.cpp
 geometry/geo2rdr.cpp
+geometry/geo2rdr_roots.cpp
 geometry/rdr2geo.cpp
+geometry/rdr2geo_roots.cpp
 geometry/RTC.cpp
 geometry/metadataCubes.cpp
 geometry/ltpcoordinates.cpp
@@ -54,6 +59,7 @@ geogrid/relocateRaster.cpp
 geogrid/geogrid.cpp
 geometry/lookIncFromSr.cpp
 image/image.cpp
+image/Resample.cpp
 image/ResampSlc.cpp
 io/gdal/Dataset.cpp
 io/gdal/GDALAccess.cpp
@@ -64,6 +70,8 @@ io/decode_bfpq_lut.cpp
 io/Raster.cpp
 io/serialization.cpp
 io/io.cpp
+matchtemplate/matchtemplate.cpp
+matchtemplate/pycuampcor.cpp
 math/math.cpp
 math/Stats.cpp
 polsar/symmetrize.cpp
@@ -74,6 +82,7 @@ signal/Crossmul.cpp
 signal/CrossMultiply.cpp
 signal/flatten.cpp
 signal/filter2D.cpp
+signal/multilook.cpp
 product/GeoGridParameters.cpp
 product/product.cpp
 product/RadarGridParameters.cpp

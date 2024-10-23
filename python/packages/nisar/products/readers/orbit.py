@@ -1,5 +1,6 @@
 import xml.etree.ElementTree as ET
 from isce3.core import DateTime, StateVector, Orbit
+import journal
 
 
 def load_orbit_from_xml(f, epoch: DateTime = None) -> Orbit:
@@ -23,7 +24,11 @@ def load_orbit_from_xml(f, epoch: DateTime = None) -> Orbit:
     It contains information such as covariance estimates and maneuvers that
     are not parsed or represented in the output object.
     """
+
+    warning_channel = journal.warning("orbit.load_orbit_from_xml")
+
     root = ET.parse(f).getroot()
+
     svl = root.find("orbitStateVectorList")
     if svl is None:
         raise IOError("Could not parse orbit XML file.")
@@ -37,5 +42,31 @@ def load_orbit_from_xml(f, epoch: DateTime = None) -> Orbit:
     if len(states) != n:
         raise IOError(f"Expected {n} orbit state vectors, got {len(states)}")
     if epoch is None:
+        warning_channel.log("No reference epoch provided. Using first date time "
+                            "from XML file as orbit reference epoch.")
         epoch = states[0].datetime
-    return Orbit(states, epoch)
+
+    orbit_kwargs = {}
+
+    # read the orbit ephemeris precision type
+    # first, try to read it from `productInformation/productType`
+    orbit_type_et = root.find('productInformation/productType')
+    if orbit_type_et is None:
+
+        # if not found, try to read it from `productInformation/fileType`
+        orbit_type_et = root.find('productInformation/fileType')
+
+    # if still not found, raise a warning
+    if orbit_type_et is None:
+        warning_channel.log("Orbit file does not contain precision"
+                            ' type (e.g., "FOE", "NOE", "MOE", "POE", or'
+                            ' "Custom").')
+
+    # otherwise, add the precision type to the orbit kwargs
+    else:
+        orbit_kwargs['type'] = orbit_type_et.text
+
+    # create Orbit object
+    orbit = Orbit(states, epoch, **orbit_kwargs)
+
+    return orbit

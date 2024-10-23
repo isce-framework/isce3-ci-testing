@@ -2,6 +2,7 @@
 
 #include <isce3/error/ErrorCode.h>
 #include <vector>
+#include <string>
 
 #include "DateTime.h"
 #include "Linspace.h"
@@ -52,9 +53,22 @@ public:
      *
      * \param[in] statevecs State vectors
      * \param[in] interp_method Interpolation method
+     * \param[in] type Orbit ephemeris precision type
      */
     Orbit(const std::vector<StateVector> & statevecs,
-          OrbitInterpMethod interp_method = OrbitInterpMethod::Hermite);
+          OrbitInterpMethod interp_method = OrbitInterpMethod::Hermite,
+          const std::string& type = "");
+
+    /**
+     * Construct from list of state vectors and orbit type
+     *
+     * Reference epoch defaults to time of first state vector
+     *
+     * \param[in] statevecs State vectors
+     * \param[in] type Orbit ephemeris precision type
+     */
+    Orbit(const std::vector<StateVector> & statevecs,
+          const std::string& type);
 
     /**
      * Construct from list of state vectors and reference epoch
@@ -62,10 +76,24 @@ public:
      * \param[in] statevecs State vectors
      * \param[in] reference_epoch Reference epoch
      * \param[in] interp_method Interpolation method
+     * \param[in] orbit_type Orbit ephemeris precision type
      */
     Orbit(const std::vector<StateVector> & statevecs,
           const DateTime & reference_epoch,
-          OrbitInterpMethod interp_method = OrbitInterpMethod::Hermite);
+          OrbitInterpMethod interp_method = OrbitInterpMethod::Hermite,
+          const std::string& type = "");
+
+    /** Create a new Orbit containing data in the requested interval
+     *
+     * \param[in] start Beginning of time interval
+     * \param[in] end   End of time interval
+     * \param[in] npad  Minimal number of state vectors to include past each of
+     *                  the given time bounds (useful to guarantee adequate
+     *                  support for interpolation).
+     * \returns Orbit object with data containing start & end times.  The
+     *          reference epoch and interpolation method are preserved.
+     */
+    Orbit crop(const DateTime& start, const DateTime& end, int npad = 0) const;
 
     /** Export list of state vectors */
     std::vector<StateVector> getStateVectors() const;
@@ -89,6 +117,12 @@ public:
 
     /** Set interpolation method */
     void interpMethod(OrbitInterpMethod interp_method) { _interp_method = interp_method; }
+
+    /** Orbit ephemeris precision type */
+    const std::string& type() const { return _type; }
+
+    /** Set the orbit ephemeris precision type */
+    void type(const std::string& orbit_type) { _type = orbit_type; }
 
     /** Time of first state vector relative to reference epoch (s) */
     double startTime() const { return _time[0]; }
@@ -162,6 +196,7 @@ private:
     std::vector<Vec3> _position;
     std::vector<Vec3> _velocity;
     OrbitInterpMethod _interp_method = OrbitInterpMethod::Hermite;
+    std::string _type = "";
 };
 
 bool operator==(const Orbit &, const Orbit &);

@@ -10,7 +10,7 @@ import numpy as np
 import isce3
 from osgeo import gdal
 from nisar.products.readers import SLC
-from nisar.workflows.helpers import copy_raster
+from nisar.workflows.helpers import copy_raster, get_cfg_freq_pols
 from nisar.workflows.yaml_argparse import YamlArgparse
 from nisar.workflows.dense_offsets_runconfig import \
     DenseOffsetsRunConfig
@@ -25,13 +25,10 @@ def run(cfg: dict):
     ref_hdf5 = cfg['input_file_group']['reference_rslc_file']
     sec_hdf5 = cfg['input_file_group']['secondary_rslc_file']
     scratch_path = pathlib.Path(cfg['product_path_group']['scratch_path'])
-    freq_pols = cfg['processing']['input_subset']['list_of_frequencies']
     offset_params = cfg['processing']['dense_offsets']
-    lines_per_block = offset_params['lines_per_block']
 
     # Initialize parameters shared between frequency A and B
     ref_slc = SLC(hdf5file=ref_hdf5)
-    sec_slc = SLC(hdf5file=sec_hdf5)
 
     # Get coregistered SLC path
     coregistered_slc_path = pathlib.Path(offset_params['coregistered_slc_path'])
@@ -50,18 +47,17 @@ def run(cfg: dict):
         isce3.cuda.core.set_device(device)
         ampcor = isce3.cuda.matchtemplate.PyCuAmpcor()
         ampcor.deviceID = cfg['worker']['gpu_id']
-        # Use memory mapping (not exposed to user but reference
-        # and secondary raster are memory-mappable)
-        ampcor.useMmap = 1
     else:
-        err_str = "Currently, ISCE3 supports only GPU dense offsets"
-        error_channel.log(err_str)
-        raise NotImplementedError(err_str)
+        ampcor = isce3.matchtemplate.PyCPUAmpcor()
+
+    # Use memory mapping (not exposed to user but reference
+    # and secondary raster are memory-mappable)
+    ampcor.useMmap = 1
 
     # Looping over frequencies and polarizations
     t_all = time.time()
 
-    for freq, pol_list in freq_pols.items():
+    for freq, _, pol_list in get_cfg_freq_pols(cfg):
         offset_scratch = scratch_path / f'dense_offsets/freq{freq}'
 
         for pol in pol_list:
@@ -105,6 +101,7 @@ def run(cfg: dict):
             ampcor.grossOffsetImageName = str(out_dir / 'gross_offset')
             ampcor.snrImageName = str(out_dir / 'snr')
             ampcor.covImageName = str(out_dir / 'covariance')
+            ampcor.corrImageName = str(out_dir / 'correlation_peak')
 
             # Create empty ENVI datasets. PyCuAmpcor will overwrite the
             # binary files. Note, use gdal to pass interleave option
@@ -120,6 +117,9 @@ def run(cfg: dict):
             create_empty_dataset(str(out_dir / 'covariance'),
                                  ampcor.numberWindowAcross,
                                  ampcor.numberWindowDown, 3, gdal.GDT_Float32)
+            create_empty_dataset(str(out_dir / 'correlation_peak'),
+                                 ampcor.numberWindowAcross,
+                                 ampcor.numberWindowDown, 1, gdal.GDT_Float32)
             # Run dense offsets
             ampcor.runAmpcor()
 

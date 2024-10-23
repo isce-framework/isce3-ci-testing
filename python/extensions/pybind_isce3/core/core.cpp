@@ -8,6 +8,7 @@
 #include "Ellipsoid.h"
 #include "EulerAngles.h"
 #include "Interp1d.h"
+#include "Interp2d.h"
 #include "Kernels.h"
 #include "Linspace.h"
 #include "LookSide.h"
@@ -21,6 +22,7 @@
 #include "TimeDelta.h"
 #include "Poly1d.h"
 #include "Poly2d.h"
+#include "xyzToEnu.h"
 
 namespace py = pybind11;
 
@@ -79,6 +81,7 @@ void addsubmodule_core(py::module & m)
 
     // forward declare bound enums
     py::enum_<isce3::core::LookSide> pyLookSide(m_core, "LookSide");
+    py::enum_<isce3::core::OrbitInterpMethod> pyOrbitInterpMethod(m_core, "OrbitInterpMethod");
 
     // add bindings
     add_constants(m_core);
@@ -94,6 +97,7 @@ void addsubmodule_core(py::module & m)
     addbinding(pyLUT1d);
     addbinding(pyLUT2d);
     addbinding(pyOrbit);
+    addbinding(pyOrbitInterpMethod);
     addbinding(pyQuaternion);
     addbinding(pyStateVector);
     addbinding(pyTimeDelta);
@@ -121,6 +125,10 @@ void addsubmodule_core(py::module & m)
     addbinding(pyCEA);
 
     addbinding_interp1d(m_core);
+    addbinding_interp2d(m_core);
     addbinding_avgLUT2dToLUT1d(m_core);
     addbinding_makeprojection(m_core);
+    addbinding_xyzToEnu(m_core);
+    addbinding_get_block_processing_parameters(m_core);
+    addbinding_get_block_processing_parameters_y(m_core);
 }

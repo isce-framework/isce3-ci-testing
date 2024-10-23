@@ -28,12 +28,16 @@ core/DenseMatrix.h
 core/detail/BuildOrbit.h
 core/detail/InterpolateOrbit.h
 core/detail/InterpolateOrbit.icc
+core/detail/Interp1d.h
+core/detail/SSOBuffer.h
 core/Ellipsoid.h
 core/EMatrix.h
 core/EulerAngles.h
 core/forward.h
 core/Interp1d.h
 core/Interp1d.icc
+core/Interp2d.h
+core/Interp2d.icc
 core/Interpolator.h
 core/Kernels.h
 core/Kernels.icc
@@ -94,8 +98,11 @@ geometry/Geo2rdr.icc
 geocode/GeocodeCov.h
 geocode/GeocodeCov.icc
 geocode/GeocodePolygon.h
+geometry/geo2rdr_roots.h
 geometry/geometry.h
+geometry/getGeolocationGrid.h
 geometry/RTC.h
+geometry/rdr2geo_roots.h
 geometry/Topo.h
 geometry/Topo.icc
 geometry/TopoLayers.h
@@ -103,6 +110,7 @@ geometry/metadataCubes.h
 geogrid/getRadarGrid.h
 geogrid/relocateRaster.h
 image/forward.h
+image/Resample.h
 image/ResampSlc.h
 image/ResampSlc.icc
 image/Tile.h
@@ -133,6 +141,8 @@ math/complexOperations.h
 math/Stats.h
 math/detail/RootFind1dBase.h
 math/polyfunc.h
+math/RootFind1dBracket.h
+math/RootFind1dBracket.icc
 math/RootFind1dNewton.h
 math/RootFind1dSecant.h
 math/Sinc.h
@@ -175,14 +185,6 @@ unwrap/icu/LabelMap.icc
 unwrap/icu/PhaseGrad.h
 unwrap/icu/SearchTable.h
 unwrap/icu/SearchTable.icc
-unwrap/ortools/ebert_graph.h
-unwrap/ortools/graph.h
-unwrap/ortools/graphs.h
-unwrap/ortools/iterators.h
-unwrap/ortools/max_flow.h
-unwrap/ortools/min_cost_flow.h
-unwrap/ortools/permutation.h
-unwrap/ortools/zvector.h
 unwrap/phass/ASSP.h
 unwrap/phass/BMFS.h
 unwrap/phass/CannyEdgeDetector.h
@@ -198,6 +200,4 @@ unwrap/phass/Point.h
 unwrap/phass/RegionMap.h
 unwrap/phass/Seed.h
 unwrap/phass/sort.h
-unwrap/snaphu/snaphu.h
-unwrap/snaphu/snaphu_unwrap.h
 )

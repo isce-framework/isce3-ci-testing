@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import h5py
 import numpy as np
 import re
@@ -7,7 +9,7 @@ import typing
 from isce3 import antenna as ant
 
 
-@dataclass(frozen=True)
+@dataclass
 class AntPatCut:
     """
     Antenna pattern cut(s) information, either relative or absolute patterns,
@@ -43,7 +45,7 @@ class AntennaParser:
 
     Parameters
     ----------
-    filename : str 
+    filename : str
         filename of HDF5 antenna file.
 
     Attributes
@@ -54,8 +56,8 @@ class AntennaParser:
         File object of HDF5.
     frequency : float
         RF frequency in Hz.
-    frame : isce3.antenna.frame 
-        Isce3 Frame object.
+    frame : isce3.antenna.frame
+        isce3 Frame object.
     rx_beams : list of str
         List of names of all receive beams.
     tag : str
@@ -63,7 +65,7 @@ class AntennaParser:
     timestamp : str
         Time stamp in UTC.
     tx_beams : list of str
-        List of names of all transmit beams. 
+        List of names of all transmit beams.
     version : str
         Version of the file.
 
@@ -166,7 +168,7 @@ class AntennaParser:
 
         Returns
         -------
-        int 
+        int
             Number of beams for the `pol`.
 
         Raises
@@ -200,7 +202,7 @@ class AntennaParser:
             ant_el = self.el_cut(beam + 1, pol)
             # get approximate peak power locaton first
             pow_db = 20 * np.log10(abs(ant_el.copol_pattern))
-            idx_pk = pow_db.argmax()
+            idx_pk = np.nanargmax(pow_db)
             # pick 5 points rather than 3, two extra just in case.
             # perform second-order polyfit (gain in dB versus EL angle in rad)
             # and then find the peak where the first derivative is zero.
@@ -247,10 +249,13 @@ class AntennaParser:
 
         Notes
         -----
-        No fitting is performed and thus the accuracy of the boundaries is
-        limited to within around half of EL angle resolution.
+        A linear interpolation of envelope of EL pattern is performed if
+        EL spacing is greater than 20 mdg. The expected accuracy at the
+        beam transition in EL shall be within around +/- 10 mdeg.
 
         """
+        # required EL spacing to be at least 20 mdeg
+        el_spacing_min = np.deg2rad(20e-3)
         ant_el = self.el_cut_all(pol)
         # check wether it is single beam or multiple beam
         num_beams = ant_el.copol_pattern.shape[0]
@@ -258,21 +263,41 @@ class AntennaParser:
             return None
         # multi beam
         # find dominant beams per max absolute amplitude or power
-        idx_max = abs(ant_el.copol_pattern).argmax(axis=0)
+        amp_pats_el = abs(ant_el.copol_pattern)
+        idx_pk_first = amp_pats_el[0].argmax()
+        idx_pk_last = amp_pats_el[-1].argmax()
+        # EL slice within peak of the first beam and peak of the last beam
+        slice_el = slice(idx_pk_first, idx_pk_last + 1)
+        amp_pats_el = amp_pats_el[:, slice_el]
+        # perform linear interpolation if el spacing is larger than
+        # required "el_spacing_min"
+        d_el = np.diff(ant_el.angle).mean()
+        if d_el > el_spacing_min:
+            el = ant_el.angle[slice_el]
+            num_el_int = round((el[-1] - el[0]) / el_spacing_min) + 1
+            el_int = np.linspace(el[0], el[-1], num=num_el_int)
+            amp_pats_int = np.zeros((num_beams, num_el_int), dtype='f8')
+            for nn in range(num_beams):
+                amp_pats_int[nn] = np.interp(el_int, el, amp_pats_el[nn])
+        else:
+            amp_pats_int = amp_pats_el
+            el_int = ant_el.angle[slice_el]
+        idx_max = amp_pats_int.argmax(axis=0)
         idx_trans = np.where(np.diff(idx_max) == 1)[0]
         if idx_trans.size != num_beams - 1:
             raise RuntimeError(f'Expected {num_beams - 1} transition '
-                               'points but got {idx_trans.size}!')
+                               f'points but got {idx_trans.size} with '
+                               f'EL index values {idx_trans}!')
         if not np.all(sorted(set(idx_trans)) == idx_trans):
-            raise RuntimeError('Transition points are not monotonically '
-                               'increasing!')
+            raise RuntimeError(
+                f'Transition points {idx_trans} are not monotonically '
+                'increasing!')
         # EL angle at transition point where two adjacent beams are
         # equally dominant
-        ela_trans = 0.5 * (ant_el.angle[idx_trans] +
-                           ant_el.angle[idx_trans + 1])
+        ela_trans = 0.5 * (el_int[idx_trans] + el_int[idx_trans + 1])
         return ela_trans, ant_el.cut_angle
 
-    def el_cut(self, beam=1, pol='H'):
+    def el_cut(self, beam=1, pol='H', full=False):
         """Parse an Elevation cut pattern from a `RX` beam.
 
         Parse individual RX Elevation-cut 1-D pattern for
@@ -282,26 +307,38 @@ class AntennaParser:
         ----------
         beam : int, default=1
             Beam number starting from one.
-
-        pol : str, default='H' 
+        pol : str, default='H'
             Polarization of the beam , either
             `H` or `V'. It is case insensitive.
+        full : bool, default=False
+            Whether or not to return the full angular coverage of input data.
+            If False, it will limit angular coverage to within around 10 dB
+            dynamic range w.r.t the one-way peak magnitude of the beam.
 
         Returns
         -------
         AntPatCut
+            angle : np.ndarray (float or complex)
+                Elevation angles in radians.
+            copol_pattern : np.ndarray (float or complex)
+                Co-pol 1-D elevation pattern in V/m.
+            cxpol_pattern : np.ndarray (float or complex)
+                Cross-pol 1-D elevation pattern in V/m.
+                None if there no cx-pol pattern!
+            cut_angle : float
+                Azimuth angle in radians for obtaining elevation cut.
 
         Raises
         ------
-        ValueError 
+        ValueError
             For bad input arguments
-        RuntimeError 
+        RuntimeError
             For missing fields/attributes in HDF5
 
         """
-        return self._get_ang_cut(beam, pol, 'elevation')
+        return self._get_ang_cut(beam, pol, 'elevation', full=full)
 
-    def az_cut(self, beam=1, pol='H'):
+    def az_cut(self, beam=1, pol='H', full=False):
         """Parse an Azimuth cut pattern from a `RX` beam.
 
         Parse individual RX Azimuth-cut 1-D pattern for
@@ -311,97 +348,157 @@ class AntennaParser:
         ----------
         beam : int, default=1
             Beam number starting from one.
-
-        pol : str, default='H' 
+        pol : str, default='H'
             Polarization of the beam , either
             `H` or `V'. It is case insensitive.
+        full : bool, default=False
+            Whether or not to return the full angular coverage of input data.
+            If False, it will limit angular coverage to within around 10 dB
+            dynamic range w.r.t the one-way peak magnitude of the beam.
 
         Returns
         -------
         AntPatCut
-            angle : np.ndarray (float or complex) 
+            angle : np.ndarray (float or complex)
                 Azimuth angles in radians.
-            copol_pattern : np.ndarray (float or complex) 
+            copol_pattern : np.ndarray (float or complex)
                 Co-pol 1-D azimuth pattern in V/m.
-            cxpol_pattern : np.ndarray (float or complex) 
-                Cross-pol 1-D azimuth pattern in V/m. 
-                None if there no x-pol pattern!
-            cut_angle : float 
+            cxpol_pattern : np.ndarray (float or complex)
+                Cross-pol 1-D azimuth pattern in V/m.
+                None if there no cx-pol pattern!
+            cut_angle : float
                 Elevation angle in radians for obtaining azimuth cut.
 
         Raises
         ------
-        ValueError 
+        ValueError
             For bad input arguments
-        RuntimeError 
-            For missing fields/attributes in HDF5        
+        RuntimeError
+            For missing fields/attributes in HDF5
 
         """
-        return self._get_ang_cut(beam, pol, 'azimuth')
+        return self._get_ang_cut(beam, pol, 'azimuth', full=full)
 
-    def el_cut_all(self, pol='H'):
-        """Parse all Co-pol EL cuts.
+    def el_cut_all(self, pol='H', full=False):
+        """Parse all Co-pol and Cx-pol EL (Elevation) cuts.
 
-        Get all uniformly-spaced EL cuts of co-pol store them in a matrix
-        with shape `num_beams` by `number of angles`. The number of
-        uniformly-spaced angles is determined by min, max angles from first 
-        and last beams and the spacing from the first beam.             
+        Get all uniformly-spaced EL cuts of co-pol and cx-pol and store them in
+        a matrix with shape `num_beams` by `number of angles`. The number of
+        uniformly-spaced angles is determined by min, max angles from first
+        and last beams and the spacing from the first beam.
 
         Parameters
         ----------
-        pol : str, default='H' 
+        pol : str, default='H'
             Polarization , either 'H' or 'V'. It is case-insensitive!
+        full : bool, default=False
+            Whether or not to return the full angular coverage of input data.
+            If False, it will limit angular coverage to within around 10 dB
+            dynamic range on both ends, first and last beam, w.r.t the
+            one-way peak magnitude of the corresponding beam.
 
         Returns
         -------
         AntPatCut
             angle : np.ndarray (float)
                 Uniformly-spaced elevation angles in radians.
-            copol_pattern : np.ndarray (float or complex) 
-                Interpolated co-pol 1-D elevation pattern in V/m with 
-                shape (number-of-beams, number-of-EL-angles). 
-            cut_angle : float 
-                Mean azimuth angle in radians from which 
+            copol_pattern : np.ndarray (float or complex)
+                Interpolated co-pol 1-D elevation pattern in V/m with
+                shape (number-of-beams, number-of-EL-angles).
+            cxpol_pattern : np.ndarray (float or complex)
+                Interpolated cx-pol 1-D elevation pattern in V/m with
+                shape (number-of-beams, number-of-EL-angles).
+            cut_angle : float
+                Mean azimuth angle in radians from which
                 elevation patterns are obtained.
 
         Raises
         ------
         ValueError
             For bad `pol` value.
+        KeyError
+            For missing mandatory fields in the product.
+
+        Notes
+        -----
+        Cx-pol patterns will be set to zeros with the same shape as co-pol
+        ones if the cx-pol patterns are missing in the product.
+
+        """
+        return self._ang_cut_all(cut_type='elevation', pol=pol, full=full)
+
+    def az_cut_all(self, pol='H', full=False):
+        """Parse all Co-pol and Cx-pol AZ (Azimuth) cuts.
+
+        Get all uniformly-spaced AZ cuts of co-pol and cx-pol and store them in
+        a matrix with shape `num_beams` by `number of angles`. The number of
+        uniformly-spaced angles is determined by min, max angles from first
+        and last beams and the spacing from the first beam.
+
+        Parameters
+        ----------
+        pol : str, default='H'
+            Polarization , either 'H' or 'V'. It is case-insensitive!
+        full : bool, default=False
+            Whether or not to return the full angular coverage of input data.
+            If False, it will limit angular coverage to within around 10 dB
+            dynamic range on both ends, first and last beam, w.r.t the
+            one-way peak magnitude of the corresponding beam.
+
+        Returns
+        -------
+        AntPatCut
+            angle : np.ndarray (float)
+                Uniformly-spaced azimuth angles in radians.
+            copol_pattern : np.ndarray (float or complex)
+                Interpolated co-pol 1-D azimuth pattern in V/m with
+                shape (number-of-beams, number-of-AZ-angles).
+            cxpol_pattern : np.ndarray (float or complex)
+                Interpolated cx-pol 1-D azimuth pattern in V/m with
+                shape (number-of-beams, number-of-AZ-angles).
+            cut_angle : float
+                Elevation angle in radians from which
+                azimuth patterns are obtained. Note that this value
+                simply represents a mean among all EL angles at which
+                individual AZ cuts are obtained.
+
+        Raises
+        ------
+        ValueError
+            For bad `pol` value.
+        KeyError
+            For missing mandatory fields in the product.
+
+        Notes
+        -----
+        Cx-pol patterns will be set to zeros with the same shape as co-pol
+        ones if the cx-pol patterns are missing in the product.
+
+        """
+        return self._ang_cut_all(cut_type='azimuth', pol=pol, full=full)
+
+    def cut_angles_az_cuts(self, pol='H'):
+        """
+        Get array of elevation angles at which all individual AZ cuts are
+        obtained per desired pol.
+
+        Parameters
+        ----------
+        pol : str, default='H'
+            Polarization , either 'H' or 'V'. It is case-insensitive!
+
+        Returns
+        -------
+        np.ndarray(float)
+            Elevation angles in radians for all azimuth cuts.
 
         """
         num_beam = self.num_beams(pol)
-        # determine full angular coverage with uniform spcaing over all beams
-        beam_first = self._get_ang_cut(
-            1, pol, 'elevation', out_keys=("angle", "copol_pattern"))
-        if num_beam > 1:
-            beam_last = self._get_ang_cut(
-                num_beam, pol, 'elevation', out_keys=("angle",
-                                                      "copol_pattern"))
-        else:
-            beam_last = beam_first
-        num_ang = int(np.ceil((beam_last.angle[-1] - beam_first.angle[0]) / (
-            beam_first.angle[1] - beam_first.angle[0]))) + 1
-        # linearly interpolate each beam over full angular coverage with out
-        # of range values filled with float or complex zero.
-        out = {}
-        out["angle"] = np.linspace(
-            beam_first.angle[0], beam_last.angle[-1], num_ang)
-        out["copol_pattern"] = np.zeros((num_beam, num_ang),
-                                        beam_first.copol_pattern.dtype)
-        out_of_range_val = 0.0
-        cut_ang_ave = 0.0
-
+        cut_ang_all = np.zeros(num_beam)
         for nn in range(num_beam):
-            beam = self._get_ang_cut(
-                nn + 1, pol, 'elevation', out_keys=("angle", "copol_pattern"))
-            out["copol_pattern"][nn, :] = np.interp(
-                out["angle"], beam.angle, beam.copol_pattern,
-                left=out_of_range_val, right=out_of_range_val)
-            cut_ang_ave += beam.cut_angle
-
-        out["cut_angle"] = cut_ang_ave / num_beam
-        return AntPatCut(**out)
+            grp_cut = self._fid[f'RX{nn+1:02d}{pol}/azimuth']
+            cut_ang_all[nn] = grp_cut["angle"].attrs.get('cut_angle')
+        return cut_ang_all
 
     # Helper functions listed below this line
     def _form_rx_regpat(self, pol: str) -> re.match:
@@ -430,11 +527,36 @@ class AntennaParser:
             raise RuntimeError(
                 f"'{attr_name}' not found in attribute of '{first_cut_name}'!")
 
-    def _get_ang_cut(self, beam: int, pol: str, cut_name: str,
+    def _get_ang_cut(self, beam: int, pol: str, cut_name: str, *,
+                     full: bool = False,
                      out_keys: tuple = ("angle", "copol_pattern",
                                         "cxpol_pattern"),
                      ang_attr: str = "cut_angle") -> AntPatCut:
         """Get angle and co/cross 1-D patterns.
+
+        Parameters
+        ----------
+        beam : int
+            Beam number starting from 1.
+        pol : str
+            Polarization, either "H" or "V"
+        cut_name : str
+            Name of the principal cut. Either "azimuth" or "elevation"
+        full: bool, default=False
+            If False, the angles on either sides will be truncated
+            within one-way 10-dB beamwidth, otherwise the entire
+            angular coverage will be returned.
+        out_keys : tuple of str,
+            default=("angle", "copol_pattern", "cxpol_pattern").
+            Keys related to fieldnames in HDF5 antenna file that
+            shall be stored in antenna cut dataclass "AntPatCut".
+        ang_attr : str, default="cut_angle"
+            Name of a desired attribute for cut angle in `angle` dataset
+            of HDF5 antenna file.
+
+        Returns
+        -------
+        nisar.products.readers.antenna.AntPatCut
 
         """
         pol = self._check_pol(pol)
@@ -447,10 +569,27 @@ class AntennaParser:
         grp_cut = self._fid[f'RX{beam:02d}{pol}/{cut_name}']
         out = dict.fromkeys(out_keys)
         for key in out_keys:
-            out[key] = grp_cut.get(key)[()]
+            # other fields except "cxpol_pattern" are mandatory!
+            try:
+                fld = grp_cut[key]
+            except KeyError:
+                if key != "cxpol_pattern":
+                    raise
+                continue
+            else:
+                out[key] = fld[()]
             if ang_attr and key == "angle":
                 out[ang_attr] = grp_cut[key].attrs.get(ang_attr)
-        return AntPatCut(**out)
+
+        # check for full or truncated angular coverage
+        cut = AntPatCut(**out)
+        if not full:
+            _, _, slice_ang = xdb_points_from_cut(cut)
+            cut.angle = cut.angle[slice_ang]
+            cut.copol_pattern = cut.copol_pattern[slice_ang]
+            if cut.cxpol_pattern is not None:
+                cut.cxpol_pattern = cut.cxpol_pattern[slice_ang]
+        return cut
 
     def _gridtype(self) -> str:
         """Get spherical grid type.
@@ -461,3 +600,127 @@ class AntennaParser:
             return grd.decode().replace('-', '_')
         except AttributeError:
             return grd.replace('-', '_')
+
+    def _ang_cut_all(self, cut_type: str, pol: str, full: bool = False
+                     ) -> AntPatCut:
+        """
+        Get all co-pol and cx-pol cut patterns of a certain cut_type
+        and pol.
+
+        Parameters
+        ----------
+        cut_type : str
+            either "elevation" or "azimuth"
+        pol : str
+            Polarization
+        full: bool, default=False
+            If False, the angles on either sides will be truncated
+            within one-way 10-dB beamwidth, otherwise the entire
+            angular coverage will be returned.
+
+        Returns
+        -------
+        nisar.products.readers.antenna.AntPatCut
+
+        """
+        num_beam = self.num_beams(pol)
+        # determine full angular coverage with uniform spcaing over all beams
+        beam_first = self._get_ang_cut(
+            1, pol, cut_type, full=True, out_keys=("angle", "copol_pattern"))
+        if num_beam > 1:
+            beam_last = self._get_ang_cut(
+                num_beam, pol, cut_type, full=True, out_keys=("angle",
+                                                              "copol_pattern"))
+        else:
+            beam_last = beam_first
+        # check for angle coverage, full or truncated
+        if full:
+            ang_first = beam_first.angle[0]
+            ang_last = beam_last.angle[-1]
+        else:  # limit angluar coverage
+            ang_first, _, _ = xdb_points_from_cut(beam_first)
+            _, ang_last, _ = xdb_points_from_cut(beam_last)
+        ang_spacing = beam_first.angle[1] - beam_first.angle[0]
+        num_ang = int(np.ceil((ang_last - ang_first) / ang_spacing)) + 1
+        # linearly interpolate each beam over desired angular coverage with
+        # out-of-range values filled with float or complex zero.
+        out = {}
+        out["angle"] = np.linspace(ang_first, ang_last, num_ang)
+        out["copol_pattern"] = np.zeros((num_beam, num_ang),
+                                        beam_first.copol_pattern.dtype)
+        out["cxpol_pattern"] = np.zeros_like(out["copol_pattern"])
+        out_of_range_val = 0.0
+        cut_ang_ave = 0.0
+
+        for nn in range(num_beam):
+            beam = self._get_ang_cut(nn + 1, pol, cut_type, full=True)
+            out["copol_pattern"][nn, :] = np.interp(
+                out["angle"], beam.angle, beam.copol_pattern,
+                left=out_of_range_val, right=out_of_range_val)
+            if beam.cxpol_pattern is not None:
+                out["cxpol_pattern"][nn, :] = np.interp(
+                    out["angle"], beam.angle, beam.cxpol_pattern,
+                    left=out_of_range_val, right=out_of_range_val)
+            cut_ang_ave += beam.cut_angle
+
+        out["cut_angle"] = cut_ang_ave / num_beam
+        return AntPatCut(**out)
+
+
+def xdb_points_from_cut(cut: AntPatCut, x_db: float = 10.0
+                        ) -> tuple[float, float, slice]:
+    """
+    Get approximate angles (radians) within x-dB dynamic range of the
+    peak of a cut pattern in EL or AZ.
+
+    Parameters
+    ----------
+    cut : nisar.products.readers.antenna.AntPatCut
+        Single-beam cut pattern info.
+    x_db : float, default=10.0
+        x dB below the peak.
+        Assumed this level is above the largest side lobe.
+
+    Returns
+    -------
+    float
+        Approximate x-dB below the peak on the left side of the peak
+        in radians
+    float
+        Approximate x-dB below the peak on the right side of the peak
+        in radians
+    slice
+        angle index slice for x-dB beamwidth.
+
+    Notes
+    -----
+    The code tries to find the first left/right angles on either side
+    of the peak to be at least `x_db` below the peak value provided enough
+    angular margins on either sides.
+
+    """
+    x = 10 ** (-abs(x_db) / 20.)
+    # ignore cx-pol pattern
+    amp_pat = abs(cut.copol_pattern)
+    idx_pk = np.argmax(amp_pat)
+    pk = amp_pat[idx_pk]
+    thrs = x * pk
+    # left side of the peak
+    idx_left = abs(amp_pat[:idx_pk] - thrs).argmin()
+    # If possible adjust the left index to make sure its mag is
+    # at least x-dB below the peak
+    if idx_left > 0 and amp_pat[idx_left] > thrs:
+        # check gain in case it is not monotonically decreasing
+        if not (amp_pat[idx_left - 1] > thrs):
+            idx_left -= 1
+    # right side of the peak
+    idx_right = abs(amp_pat[idx_pk:] - thrs).argmin() + idx_pk
+    # If possible adjust the right index to make sure its mag is
+    # at least x-dB below the peak
+    if idx_right < (amp_pat.size - 1) and amp_pat[idx_right] > thrs:
+        # check gain in case it is not monotonically decreasing
+        if not (amp_pat[idx_right + 1] > thrs):
+            idx_right += 1
+
+    return (cut.angle[idx_left], cut.angle[idx_right],
+            slice(idx_left, idx_right + 1))

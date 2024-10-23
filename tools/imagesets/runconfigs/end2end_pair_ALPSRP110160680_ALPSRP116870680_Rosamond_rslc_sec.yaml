@@ -14,6 +14,7 @@ runconfig:
             external_calibration:
             internal_calibration:
             antenna_pattern:
+            corner_reflector_file: input_L0B_RRSD_ALPSRP116870680_Rosamond/2008-04-04_0619_Rosamond-corner-reflectors_NISAR.csv
         product_path_group:
             product_path: output_rslc_sec
             scratch_path: scratch_rslc_sec
@@ -83,15 +84,15 @@ runconfig:
             gpu_id: 0
         processing:
             output_grid:
-                start_time: 2008-04-04T06:19:17.452060000
-                end_time: 2008-04-04T06:19:33.851984624
+                start_time: 2008-04-04T06:19:18.81
+                end_time: 2008-04-04T06:19:32.27
                 start_range:
                 end_range:
-                output_prf:
+                output_prf: 1520
                 time_snap_interval: 1.0
             range_window:
                 kind: Kaiser
-                shape: 3.0
+                shape: 1.6
             azimuth_window:
                 kind: Kaiser
                 shape: 0.0
@@ -104,10 +105,6 @@ runconfig:
                 spacing:
                     range: 2000.0
                     azimuth: 1.0
-                rdr2geo:
-                    threshold: 1.0e-08
-                    maxiter: 25
-                    extraiter: 15
             rangecomp:
                 mode: full
                 block_size:
@@ -124,14 +121,6 @@ runconfig:
                     approx_oversample: 1.7
                     fit: Table
                     fit_order: 2048
-                rdr2geo:
-                    threshold: 1.0e-08
-                    maxiter: 25
-                    extraiter: 15
-                geo2rdr:
-                    threshold: 1.0e-08
-                    maxiter: 50
-                    delta_range: 10.0
             dry_troposphere_model: nodelay
             dem:
                 reference_height: 661.0
@@ -144,11 +133,13 @@ runconfig:
             is_enabled:
                 presum_blu: true
                 rangecomp: true
-                eap: true
+                eap: false
                 range_cor: true
                 azcomp: true
         qa:
             workflows:
                 validate: true
                 qa_reports: true
-                nesz: true
+                absolute_radiometric_calibration: true
+                nes0: true
+                point_target_analyzer: true

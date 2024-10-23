@@ -4,12 +4,12 @@ from isce3.core import TimeDelta
 import numpy.testing as npt
 
 def load_h5():
-    from isce3.ext.isce3.core import Orbit
+    from isce3.core import load_orbit_from_h5_group
     from iscetest import data
     from os import path
     import h5py
     f = h5py.File(path.join(data, "envisat.h5"), 'r')
-    return Orbit.load_from_h5(f["/science/LSAR/SLC/metadata/orbit"])
+    return load_orbit_from_h5_group(f["/science/LSAR/SLC/metadata/orbit"])
 
 o = load_h5();
 
@@ -33,7 +33,11 @@ def test_props():
 def test_members():
     import numpy
     from numpy.linalg import norm
-    o = load_h5();
+    o = load_h5()
+
+    # Verify orbit type is "POE"
+    # (contents of "//science/LSAR/SLC/metadata/orbit/orbitType")
+    assert (o.get_type() == 'POE')
 
     # Check valid earth orbit distance
     earth_radius  =  6_000e3 # meters
@@ -78,3 +82,32 @@ def test_contains():
     assert not orbit.contains(orbit.end_time + 1.0)
     mid = 0.5 * (orbit.start_time + orbit.end_time)
     assert orbit.contains(mid)
+
+def test_crop():
+    orbit = load_h5()
+    # want to nudge a bit past intrinsic spacing, so make sure test
+    # dataset hasn't been updated
+    assert orbit.time.spacing == 60.
+
+    # a point just after the second StateVector
+    start = orbit.start_datetime + TimeDelta(61)
+    # a point just before the next-to-last StateVector
+    stop = orbit.end_datetime - TimeDelta(61)
+    cropped_orbit = orbit.crop(start, stop)
+
+    t0 = (start - cropped_orbit.reference_epoch).total_seconds()
+    t1 = (stop - cropped_orbit.reference_epoch).total_seconds()
+    npt.assert_equal(cropped_orbit.size, orbit.size - 2)
+    npt.assert_(cropped_orbit.contains(t0))
+    npt.assert_(cropped_orbit.contains(t1))
+
+    # Now crop around a single point with padding and make sure we get the
+    # desired amount.
+    start = stop = orbit.mid_datetime
+    npad = 3
+    cropped_orbit = orbit.crop(start, stop, npad)
+    npt.assert_(cropped_orbit.size >= 2 * npad)
+
+    # Make sure reference epoch doesn't change interp and epoch properties.
+    npt.assert_(cropped_orbit.get_interp_method() == orbit.get_interp_method())
+    npt.assert_(cropped_orbit.reference_epoch == orbit.reference_epoch)

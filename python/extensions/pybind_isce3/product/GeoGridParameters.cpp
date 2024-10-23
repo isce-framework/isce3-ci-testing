@@ -31,6 +31,8 @@ void addbinding(py::class_<GeoGridParameters> & pyGeoGridParams)
                     "start_y",
                     py::overload_cast<>(&GeoGridParameters::startY, py::const_),
                     py::overload_cast<double>(&GeoGridParameters::startY))
+            .def_property_readonly("end_x", &GeoGridParameters::endX)
+            .def_property_readonly("end_y", &GeoGridParameters::endY)
             .def_property(
                     "spacing_x",
                     py::overload_cast<>(&GeoGridParameters::spacingX,
@@ -52,7 +54,44 @@ void addbinding(py::class_<GeoGridParameters> & pyGeoGridParams)
             .def_property(
                     "epsg",
                     py::overload_cast<>(&GeoGridParameters::epsg, py::const_),
-                    py::overload_cast<int>(&GeoGridParameters::epsg));
+                    py::overload_cast<int>(&GeoGridParameters::epsg))
+            // slice to get subset of GeoGridParameters
+            .def("__getitem__", [](const GeoGridParameters& self, py::tuple key) {
+                    if (key.size() != 2) {
+                        throw std::invalid_argument("require 2 slices");
+                    }
+                    auto islice = key[0].cast<py::slice>();
+                    auto jslice = key[1].cast<py::slice>();
+                    py::ssize_t start, stop, step, slicelen;
+
+                    int epsg = self.epsg();
+
+                    if (!islice.compute(self.length(), &start, &stop, &step, &slicelen))
+                        throw std::invalid_argument("bad row slice");
+                    if (step <= 0)
+                        throw py::index_error("cannot reverse grid");
+                    double start_y = self.startY() + start * self.spacingY();
+                    int length = slicelen;
+                    double spacing_y = self.spacingY() * step;
+
+                    if (!jslice.compute(self.width(), &start, &stop, &step, &slicelen))
+                        throw std::invalid_argument("bad column slice");
+                    if (step <= 0)
+                        throw py::index_error("cannot reverse grid");
+                    double start_x = self.startX() + start * self.spacingX();
+                    int width = slicelen;
+                    double spacing_x = self.spacingX() * step;
+
+                    return GeoGridParameters(
+                        start_x,
+                        start_y,
+                        spacing_x,
+                        spacing_y,
+                        width,
+                        length,
+                        epsg
+                    );
+            });
 }
 
 void addbinding_bbox_to_geogrid(py::module & m)
@@ -68,8 +107,7 @@ void addbinding_bbox_to_geogrid(py::module & m)
             py::arg("max_height") = isce3::core::GLOBAL_MAX_HEIGHT,
             py::arg("margin") = 0.0,
             py::arg("pts_per_edge") = 11,
-            py::arg("threshold") = 1.0e-8,
-            py::arg("numiter") = 15,
+            py::arg("threshold") = isce3::geometry::detail::DEFAULT_TOL_HEIGHT,
             py::arg("height_threshold") = 100, R"(
     Create a GeoGridParameters object by using spacing and ESPG from a DEM, and
     by estimating a bounding box with a radar grid. Spacing adjustable via scalar.
@@ -84,8 +122,7 @@ void addbinding_bbox_to_geogrid(py::module & m)
         max_height          Height upper bound
         margin              Amount to pad estimated bounding box. In decimal degrees.
         point_per_edge      Number of points to use on each side of radar grid.
-        threshold           Slant range threshold for convergence.
-        numiter             Max number of iterations for converence.
+        threshold           Height threshold (m) for rdr2geo convergence.
         height_threshold    Height threshold for convergence.
             )")
     .def("bbox_to_geogrid",
@@ -100,8 +137,7 @@ void addbinding_bbox_to_geogrid(py::module & m)
             py::arg("max_height") = isce3::core::GLOBAL_MAX_HEIGHT,
             py::arg("margin") = 0.0,
             py::arg("pts_per_edge") = 11,
-            py::arg("threshold") = 1.0e-8,
-            py::arg("numiter") = 15,
+            py::arg("threshold") = isce3::geometry::detail::DEFAULT_TOL_HEIGHT,
             py::arg("height_threshold") = 100, R"(
     Create a GeoGridParameters object by using spacing and ESPG from a DEM, and
     by estimating a bounding box with a radar grid. Spacing adjustable via scalar.
@@ -117,8 +153,7 @@ void addbinding_bbox_to_geogrid(py::module & m)
         max_height          Height upper bound
         margin              Amount to pad estimated bounding box. In decimal degrees.
         point_per_edge      Number of points to use on each side of radar grid.
-        threshold           Slant range threshold for convergence.
-        numiter             Max number of iterations for converence.
+        threshold           Height threshold (m) for rdr2geo convergence.
         height_threshold    Height threshold for convergence.
         )");
 }

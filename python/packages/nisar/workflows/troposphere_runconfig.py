@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 
 from datetime import datetime
-import h5py
 import journal
-import numpy as np
 import os
 import pygrib
 
+from isce3.io import HDF5OptimizedReader
 from nisar.workflows.runconfig import RunConfig
 
 def troposphere_delay_check(cfg):
@@ -32,7 +31,7 @@ def troposphere_delay_check(cfg):
     # only if the troposphere is enabled
     if tropo_cfg['enabled']:
 
-        dynamic_weather_model_cfg = cfg['dynamic_ancillary_file_group']['troposphere_weather_model']
+        dynamic_weather_model_cfg = cfg['dynamic_ancillary_file_group']['troposphere_weather_model_files']
 
         for option in ['reference', 'secondary']:
 
@@ -54,46 +53,70 @@ def troposphere_delay_check(cfg):
                 error_channel.log(err_str)
                 raise ValueError(err_str)
 
-            # Check the days difference between weather model and RSLC
-            grbs = pygrib.open(weather_model_file)
-            if grbs is None:
-                err_str = f'{weather_model_file} is not a GRIB file'
-                error_channel.log(err_str)
-                raise ValueError(err_str)
 
-            # Check if there are messages in the GRIB file
-            if grbs.messages <= 0:
-                err_str = 'there are no messages in the GRIB file'
-                error_channel.log(err_str)
-                raise ValueError(err_str)
+            # RSLC start time
+            with HDF5OptimizedReader(name=rslc_file, mode='r', libver='latest', swmr=True) as f:
+                rslc_date = f['science/LSAR/identification/zeroDopplerStartTime'][()]\
+                        .astype('datetime64[s]').astype(datetime)
 
-            # Weather model valid date of message 1
-            grb_msg = grbs.message(1)
-            weather_model_date = grb_msg.validDate
 
-            with h5py.File(rslc_file, 'r', libver='latest', swmr=True) as f:
-                rslc_start_time = str(np.array(f['science/LSAR/identification/zeroDopplerStartTime']).astype(str))
+            # Troposphere package
+            tropo_pkg = tropo_cfg['package'].lower()
 
-                # Make sure that timestamp format is 'YYYY-MM-DDTH:M:S' where the second has no decmials
-                rslc_start_time = rslc_start_time[:19]
+            # Weather model type
+            weather_model_type = tropo_cfg['weather_model_type'].upper()
 
-                rslc_date = datetime.strptime(rslc_start_time, '%Y-%m-%dT%H:%M:%S')
-                f.close()
+            # pyAPS only supports the grib format weather model
+            if tropo_pkg == 'pyaps':
+
+                # Check the days difference between weather model and RSLC
+                grbs = pygrib.open(weather_model_file)
+                if grbs is None:
+                    err_str = f'{weather_model_file} is not a GRIB format'
+                    error_channel.log(err_str)
+                    raise ValueError(err_str)
+
+                # Check if there are messages in the GRIB file
+                if grbs.messages <= 0:
+                    err_str = 'there are no messages in the GRIB file'
+                    error_channel.log(err_str)
+                    raise ValueError(err_str)
+
+                # Weather model valid date of message 1
+                grb_msg = grbs.message(1)
+                weather_model_date = grb_msg.validDate
+            else:
+                #  Get the datetime of weather model in NetCDF format for RAiDER
+                try:
+                    # The HRES weather model file with ECMWF NetCDF format
+                    if weather_model_type == 'HRES':
+                        import xarray as xr
+                        ds = xr.open_dataset(weather_model_file)
+                        # Get the datetime of the weather model file
+                        weather_model_date = ds.time.values.astype('datetime64[s]').astype(datetime)[0]
+                    # The other weather model files with RAiDER NetCDF format
+                    else:
+                        with HDF5OptimizedReader(name=weather_model_file, mode='r', libver='latest', swmr=True) as f:
+                                weather_model_date = datetime.strptime(f.attrs['datetime'].astype(str),
+                                                                    '%Y_%m_%dT%H_%M_%S')
+                except ValueError:
+                    err_str = f'{weather_model_file} is not a netCDF format, and not supported by RAiDER package'
+                    error_channel.log(err_str)
+                    raise ValueError(err_str)
 
             diff = rslc_date - weather_model_date
             hours =  abs(diff.total_seconds()) / 3600.0
 
             # Check if it is more than 1 day (i.e. > 24 hours)
             if hours > 24.0:
-                err_str = 'days difference between weather model and RSLC should be within one day'
+                err_str = f"days difference between weather model ({weather_model_date})" + \
+                          f" and RSLC ({rslc_date}) should be within one day"
                 error_channel.log(err_str)
                 raise ValueError(err_str)
 
-        weather_model_type = tropo_cfg['weather_model_type'].upper()
-
         # Check the weather model
         weather_model_types = ['ERA5', 'ERAINT', 'HRES', 'NARR', 'MERRA',
-                                'ECWMF', 'ERAI', 'GMAO', 'HRRR', 'NCMR']
+                                'ECMWF', 'ERAI', 'GMAO', 'HRRR', 'NCMR']
 
         if weather_model_type not in weather_model_types:
             weather_model_types = ','.join(weather_model_types)
@@ -103,7 +126,6 @@ def troposphere_delay_check(cfg):
             raise ValueError(err_str)
 
         # Check the external tropo delay package
-        tropo_pkg = tropo_cfg['package'].lower()
         if tropo_pkg not in ['pyaps', 'raider']:
             err_str = f"unidentified package {tropo_cfg['package']}," + \
                     " please use either pyaps or raider"
@@ -118,7 +140,7 @@ def troposphere_delay_check(cfg):
             raise ValueError(err_str)
 
         if (tropo_pkg  == 'raider') and \
-                weather_model_type not in ['ERA5', 'HRES', 'MERRA', 'ECWMF',
+                weather_model_type not in ['ERA5', 'HRES', 'MERRA', 'ECMWF',
                                            'ERAI', 'GMAO', 'HRRR', 'NCMR']:
             err_str = f'weather model {weather_model_type} is not supported by RAiDER package'
             error_channel.log(err_str)
@@ -139,14 +161,6 @@ def troposphere_delay_check(cfg):
         if tropo_direction == 'line_of_sight_raytracing' and \
                 tropo_pkg != 'raider':
             err_str = "for line_of_sight_raytracing delay type, the package must be 'raider'"
-            error_channel.log(err_str)
-            raise ValueError(err_str)
-
-        # Check the troposphere delay product
-        delay_product = tropo_cfg['delay_product'].lower()
-        if delay_product not in ['wet', 'hydro', 'comb']:
-            err_str = f"unidentified delay product '{tropo_cfg['delay_product']}'," + \
-                        "it should be one or more of 'wet', 'hydro', and 'comb'"
             error_channel.log(err_str)
             raise ValueError(err_str)
 

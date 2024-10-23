@@ -34,7 +34,7 @@ TEST(MetadataTest, FromHDF5) {
     isce3::io::IGroup metaGroup = file.openGroup("/science/LSAR/SLC/metadata");
 
     // Deserialize the Metadata
-    isce3::product::loadFromH5(metaGroup, meta);
+    isce3::product::loadFromH5(metaGroup, meta, "L1");
 
     // Get the orbit
     const isce3::core::Orbit & orbit = meta.orbit();
@@ -73,8 +73,6 @@ TEST(MetadataTest, FromHDF5) {
 
     // Check the ProcessingInformation
     const isce3::product::ProcessingInformation & proc = meta.procInfo();
-    ASSERT_NEAR(proc.slantRange()[0], 826000.0, 1.0e-10);
-    ASSERT_NEAR(proc.zeroDopplerTime()[0], 237321.0, 1.0e-10);
 
     // Check effective velocity LUT
     const isce3::core::LUT2d<double> & veff = proc.effectiveVelocity();

@@ -4,22 +4,28 @@
 
 import argparse
 import os
-import backoff
+import re
 
+import backoff
 import numpy as np
 import shapely.ops
 import shapely.wkt
 from osgeo import gdal, osr
 from shapely.geometry import LinearRing, Point, Polygon, box
 
+bucket_name = 'nisar-dem'
 
 # Enable exceptions
 gdal.UseExceptions()
 
+# Earth circumference and radius in meters
+EARTH_APPROX_CIRCUMFERENCE = 40075017.
+EARTH_RADIUS = EARTH_APPROX_CIRCUMFERENCE / (2 * np.pi)
+
 
 def cmdLineParse():
     """
-     Command line parser
+    Command line parser
     """
     parser = argparse.ArgumentParser(description="""
                                      Stage and verify DEM for processing. """,
@@ -38,6 +44,9 @@ def cmdLineParse():
     parser.add_argument('-b', '--bbox', type=float, action='store',
                         dest='bbox', default=None, nargs='+',
                         help='Spatial bounding box in latitude/longitude (WSEN, decimal degrees)')
+    parser.add_argument('-v', '--version', type=str, action='store',
+                        default='1.1', dest='version',
+                        help='DEM version in the form of major_number.minor_number')
     return parser.parse_args()
 
 
@@ -59,7 +68,7 @@ def check_dateline(poly):
 
     xmin, _, xmax, _ = poly.bounds
     # Check dateline crossing
-    if (xmax - xmin) > 180.0:
+    if ((xmax - xmin > 180.0) or (xmin <= 180.0 <= xmax)):
         dateline = shapely.wkt.loads('LINESTRING( 180.0 -90.0, 180.0 90.0)')
 
         # build new polygon with all longitudes between 0 and 360
@@ -74,6 +83,21 @@ def check_dateline(poly):
         decomp = shapely.ops.polygonize(border_lines)
 
         polys = list(decomp)
+
+        # The Copernicus DEM used for NISAR processing has a longitude
+        # range [-180, +180]. The current version of gdal.Translate
+        # does not allow to perform dateline wrapping. Therefore, coordinates
+        # above 180 need to be wrapped down to -180 to match the Copernicus
+        # DEM longitude range
+        for polygon_count in range(2):
+            x, y = polys[polygon_count].exterior.coords.xy
+            if not any(k > 180 for k in x):
+                continue
+
+            # Otherwise, wrap longitude values down to 360 deg
+            x_wrapped_minus_360 = np.asarray(x) - 360
+            polys[polygon_count] = Polygon(zip(x_wrapped_minus_360, y))
+
         assert (len(polys) == 2)
     else:
         # If dateline is not crossed, treat input poly as list
@@ -86,7 +110,7 @@ def determine_polygon(ref_slc, bbox=None):
     """Determine bounding polygon using RSLC radar grid/orbit
     or user-defined bounding box
 
-    Parameters:
+    Parameters
     ----------
     ref_slc: str
         Filepath to reference RSLC product
@@ -94,7 +118,7 @@ def determine_polygon(ref_slc, bbox=None):
         Bounding box with lat/lon coordinates (decimal degrees)
         in the form of [West, South, East, North]
 
-    Returns:
+    Returns
     -------
     poly: shapely.Geometry.Polygon
         Bounding polygon corresponding to RSLC perimeter
@@ -113,14 +137,14 @@ def determine_polygon(ref_slc, bbox=None):
 def point2epsg(lon, lat):
     """Return EPSG code based on point lat/lon
 
-    Parameters:
+    Parameters
     ----------
     lat: float
         Latitude coordinate of the point
     lon: float
         Longitude coordinate of the point
 
-    Returns:
+    Returns
     -------
     epsg code corresponding to the point lat/lon coordinates
     """
@@ -143,8 +167,8 @@ def get_geo_polygon(ref_slc, min_height=-500.,
                     max_height=9000., pts_per_edge=5):
     """Create polygon (EPSG:4326) using RSLC radar grid and orbits
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     ref_slc: str
         Path to RSLC product to stage the DEM for
     min_height: float
@@ -154,14 +178,14 @@ def get_geo_polygon(ref_slc, min_height=-500.,
     pts_per_edge: float
         Number of points per edge for min/max bounding box computation
 
-    Returns:
+    Returns
     -------
     poly: shapely.Geometry.Polygon
         Bounding polygon corresponding to RSLC perimeter on the ground
     """
-    from isce3.core import LUT2d
-    from isce3.geometry import DEMInterpolator, get_geo_perimeter_wkt
-    from nisar.products.readers import SLC
+    from isce3.core import LUT2d  # pylint: disable=import-error
+    from isce3.geometry import DEMInterpolator, get_geo_perimeter_wkt  # pylint: disable=import-error
+    from nisar.products.readers import SLC  # pylint: disable=import-error
 
     # Prepare SLC dataset input
     productSlc = SLC(hdf5file=ref_slc)
@@ -196,12 +220,13 @@ def determine_projection(polys):
     EPSG is computed for a regular list of points. EPSG
     is assigned based on a majority criteria.
 
-    Parameters:
-    -----------
+    Parameters
+    ----------
     polys: shapely.Geometry.Polygon
         List of shapely Polygons
-    Returns:
-    --------
+
+    Returns
+    -------
     epsg:
         List of EPSG codes corresponding to elements in polys
     """
@@ -234,7 +259,7 @@ def determine_projection(polys):
 
 
 @backoff.on_exception(backoff.expo, Exception, max_tries=8, max_value=32)
-def translate_dem(vrt_filename, outpath, xmin, xmax, ymin, ymax):
+def translate_dem(vrt_filename, outpath, x_min, x_max, y_min, y_max):
     """Translate DEM from nisar-dem bucket. This
        function is decorated to perform retries
        using exponential backoff to make the remote
@@ -243,41 +268,69 @@ def translate_dem(vrt_filename, outpath, xmin, xmax, ymin, ymax):
        throttling (see "Query throttling" section at
        https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instancedata-data-retrieval.html).
 
-    Parameters:
+    Parameters
     ----------
     vrt_filename: str
         Path to the input VRT file
     outpath: str
         Path to the translated output GTiff file
-    xmin: float
+    x_min: float
         Minimum longitude bound of the subwindow
-    xmax: float
+    x_max: float
         Maximum longitude bound of the subwindow
-    ymin: float
+    y_min: float
         Minimum latitude bound of the subwindow
-    ymax: float
+    y_max: float
         Maximum latitude bound of the subwindow
     """
 
     ds = gdal.Open(vrt_filename, gdal.GA_ReadOnly)
+
+    input_x_min, xres, _, input_y_max, _, yres = ds.GetGeoTransform()
+    length = ds.GetRasterBand(1).YSize
+    width = ds.GetRasterBand(1).XSize
+
+    # Declare lambda function to snap min/max X and Y
+    # coordinates over the DEM grid
+    snap_coord = lambda val, snap, offset, round_func: round_func(  # noqa: E731
+        float(val - offset) / snap) * snap + offset
+
+    # Snap edge coordinates using the DEM pixel spacing
+    # and starting coordinates. Max values are rounded
+    # using np.ceil and min values are rounded with np.floor
+    x_min = snap_coord(x_min, xres, input_x_min, np.floor)
+    x_max = snap_coord(x_max, xres, input_x_min, np.ceil)
+    y_min = snap_coord(y_min, yres, input_y_max, np.floor)
+    y_max = snap_coord(y_max, yres, input_y_max, np.ceil)
+
+    input_y_min = input_y_max + length * yres
+    input_x_max = input_x_min + width * xres
+
+    x_min = max(x_min, input_x_min)
+    x_max = min(x_max, input_x_max)
+    y_min = max(y_min, input_y_min)
+    y_max = min(y_max, input_y_max)
+
     gdal.Translate(outpath, ds, format='GTiff',
-                   projWin=[xmin, ymax, xmax, ymin])
+                   projWin=[x_min, y_max, x_max, y_min])
     ds = None
 
 
-def download_dem(polys, epsgs, margin, outfile):
+def download_dem(polys, epsgs, outfile, version):
     """Download DEM from nisar-dem bucket
 
-    Parameters:
+    Parameters
     ----------
     polys: shapely.geometry.Polygon
         List of shapely polygons
     epsg: str, list
         List of EPSG codes corresponding to polys
-    margin: float
-        Buffer margin (in km) applied for DEM download
-    outfile:
+    outfile: str
         Path to the output DEM file to be staged
+    version: str
+        DEM version. This is contained in the filepath to
+        the DEM VRTs (e.g., s3://nisar-dem/v1.0/EPSG4326/<EPSG4326_FILES>).
+        DEM version is in the form of major_version.minor_version
     """
 
     if 3031 in epsgs:
@@ -285,39 +338,105 @@ def download_dem(polys, epsgs, margin, outfile):
         polys = transform_polygon_coords(polys, epsgs)
         # Need one EPSG as in polar stereo we have one big polygon
         epsgs = [3031]
-        margin = margin * 1000
     elif 3413 in epsgs:
         epsgs = [3413] * len(epsgs)
         polys = transform_polygon_coords(polys, epsgs)
         # Need one EPSG as in polar stereo we have one big polygon
         epsgs = [3413]
-        margin = margin * 1000
     else:
         # set epsg to 4326 for each element in the list
         epsgs = [4326] * len(epsgs)
         # convert margin to degree (approx formula)
-        margin = margin / 40000 * 360
 
     # Download DEM for each polygon/epsg
     file_prefix = os.path.splitext(outfile)[0]
     dem_list = []
     for n, (epsg, poly) in enumerate(zip(epsgs, polys)):
-        vrt_filename = f'/vsis3/nisar-dem/EPSG{epsg}/EPSG{epsg}.vrt'
-        poly = poly.buffer(margin)
+        vrt_filename = f'/vsis3/{bucket_name}/v{version}/EPSG{epsg}/EPSG{epsg}.vrt'
         outpath = f'{file_prefix}_{n}.tiff'
         dem_list.append(outpath)
         xmin, ymin, xmax, ymax = poly.bounds
         translate_dem(vrt_filename, outpath, xmin, xmax, ymin, ymax)
 
-    # Build vrt with downloaded DEMs
-    gdal.BuildVRT(outfile, dem_list)
+    # Get the DEM description from the README.txt file using GDAL
+    in_readme_path = vrt_filename.replace(f'EPSG{epsg}.vrt', 'README.txt')  # pylint: disable=undefined-loop-variable
+    dem_descr = extract_dem_description(in_readme_path)
+
+    # Build vrt with downloaded DEMs and add dem_descr in metadata
+    vrt_dataset = gdal.BuildVRT(outfile, dem_list)
+    vrt_dataset.SetMetadataItem("dem_description", f'{dem_descr}')
+
+    # Add license text to GeoTiff files
+    for dem_file in dem_list:
+        add_dem_license_to_tiff(dem_file)
+
+
+def extract_dem_description(in_readme_path):
+    """Extract DEM description from README.txt on nisar-dem
+       s3 bucket
+
+    Parameters
+    ----------
+    in_readme_path: str
+        Path to the README.txt on the nisar-dem
+        s3 bucket
+
+    Returns
+    -------
+    dem_descr: str
+        String containing the "dem description"
+        extracted from the README.txt
+    """
+    pattern = r'^\s*- Short description: (.+)$'
+
+    # JPL internal s3 buckets are not accessible via
+    # https addresses due to cybersecurity concerns. This
+    # excludes using "requests". Using boto3 and its AWS s3
+    # API would add another unnecessary dependency to ISCE3.
+    # Therefore, we use GDAL to read a remote text file.
+    fp = gdal.VSIFOpenL(in_readme_path, "rb")
+    text = gdal.VSIFReadL(1, 100000, fp).decode()
+    gdal.VSIFCloseL(fp)
+
+    match = re.search(pattern, text, re.MULTILINE)
+    if match:
+        dem_descr = match.group(1)
+    else:
+        err_str = 'Line with "Short Description" not found in README.txt'
+        raise ValueError(err_str)
+
+    return dem_descr
+
+
+def add_dem_license_to_tiff(dem_file):
+    '''
+    Add DEM license statement to downloaded DEM files
+
+    Parameters
+    ----------
+    dem_file: str
+        Path to DEM Tiff
+    '''
+    license_text = "This digital elevation model (DEM) was prepared at the Jet Propulsion Laboratory, " \
+                   "California Institute of Technology, under contract with the National Aeronautics and " \
+                   "Space Administration, using the Copernicus DEM 30-m and Copernicus DEM 90-m models " \
+                   "provided by the European Space Agency. The Copernicus DEM 30-m and Copernicus DEM " \
+                   "90-m were produced using Copernicus WorldDEM-30 © DLR e.V. 2010-2014 and © Airbus " \
+                   "Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and " \
+                   "ESA; all rights reserved. The organizations in charge of the NISAR mission by law or by " \
+                   "delegation do not incur any liability for any use of this DEM. The organisations in charge " \
+                   "of the Copernicus programme by law or by delegation do not incur any liability for any use " \
+                   "of the Copernicus WorldDEM-30."
+
+    ds = gdal.Open(dem_file, gdal.GA_Update)
+    ds.SetMetadataItem("LICENSE", license_text)
 
 
 def transform_polygon_coords(polys, epsgs):
     """Transform coordinates of polys (list of polygons)
        to target epsgs (list of EPSG codes)
 
-    Parameters:
+    Parameters
     ----------
     polys: shapely.Geometry.Polygon
         List of shapely polygons
@@ -327,7 +446,7 @@ def transform_polygon_coords(polys, epsgs):
     """
 
     # Assert validity of inputs
-    assert(len(polys) == len(epsgs))
+    assert len(polys) == len(epsgs)
 
     # Transform each point of the perimeter in target EPSG coordinates
     llh = osr.SpatialReference()
@@ -360,20 +479,20 @@ def check_dem_overlap(DEMFilepath, polys):
        and DEM that stage_dem.py would download
        based on RSLC or bbox provided information
 
-    Parameters:
+    Parameters
     ----------
     DEMFilepath: str
         Filepath to the user-provided DEM
     polys: shapely.geometry.Polygon
         List of polygons computed from RSLC or bbox
 
-    Returns:
+    Returns
     -------
     perc_area: float
         Area (in percentage) covered by the intersection between the
         user-provided dem and the one downloadable by stage_dem.py
     """
-    from isce3.io import Raster
+    from isce3.io import Raster  # pylint: disable=import-error
 
     # Get local DEM edge coordinates
     DEM = Raster(DEMFilepath)
@@ -394,25 +513,106 @@ def check_dem_overlap(DEMFilepath, polys):
     return perc_area
 
 
-def check_aws_connection():
+def check_aws_connection(version='1.1'):
     """Check connection to AWS s3://nisar-dem bucket
        Throw exception if no connection is established
+
+    Parameters
+    ---------
+    version: str
+        DEM Version
     """
     import boto3
     s3 = boto3.resource('s3')
-    obj = s3.Object('nisar-dem', 'EPSG3031/EPSG3031.vrt')
+    obj = s3.Object('nisar-dem', f'v{version}/EPSG3031/README.txt')
     try:
         obj.get()['Body'].read()
     except Exception:
-        errmsg = 'No access to nisar-dem s3 bucket. Check your AWS credentials' \
+        errmsg = 'No access to nisar-dem s3 bucket. Check your AWS credentials ' \
                  'and re-run the code'
         raise ValueError(errmsg)
+
+
+def apply_margin_polygon(polygon, margin_in_km=5):
+    '''
+    Convert margin from km to degrees and
+    apply to polygon
+
+    Parameters
+    ----------
+    polygon: shapely.Geometry.Polygon
+        Bounding polygon covering the area on the
+        ground over which download the DEM
+    margin_in_km: np.float
+        Buffer in km to add to polygon
+
+    Returns
+    ------
+    poly_with_margin: shapely.Geometry.box
+        Bounding box with margin applied
+    '''
+    lon_min, lat_min, lon_max, lat_max = polygon.bounds
+    lat_worst_case = max([lat_min, lat_max])
+
+    # Convert margin from km to degrees
+    lat_margin = margin_km_to_deg(margin_in_km)
+    lon_margin = margin_km_to_longitude_deg(margin_in_km, lat=lat_worst_case)
+
+    if lon_max - lon_min > 180:
+        lon_min, lon_max = lon_max, lon_min
+
+    poly_with_margin = box(lon_min - lon_margin, max([lat_min - lat_margin, -90]),
+                           lon_max + lon_margin, min([lat_max + lat_margin, 90]))
+    return poly_with_margin
+
+
+def margin_km_to_deg(margin_in_km):
+    '''
+    Converts a margin value from km to degrees
+
+    Parameters
+    ----------
+    margin_in_km: np.float
+        Margin in km
+
+    Returns
+    -------
+    margin_in_deg: np.float
+        Margin in degrees
+    '''
+    km_to_deg_at_equator = 1000. / (EARTH_APPROX_CIRCUMFERENCE / 360.)
+    margin_in_deg = margin_in_km * km_to_deg_at_equator
+
+    return margin_in_deg
+
+
+def margin_km_to_longitude_deg(margin_in_km, lat=0):
+    '''
+    Converts margin from km to degrees as a function of
+    latitude
+
+    Parameters
+    ----------
+    margin_in_km: np.float
+        Margin in km
+    lat: np.float
+        Latitude to use for the conversion
+
+    Returns
+    ------
+    delta_lon: np.float
+        Longitude margin as a result of the conversion
+    '''
+    delta_lon = (
+        180 * 1000 * margin_in_km / (np.pi * EARTH_RADIUS * np.cos(np.pi * lat / 180))
+    )
+    return delta_lon
 
 
 def main(opts):
     """Main script to execute dem staging
 
-    Parameters:
+    Parameters
     ----------
     opts : argparse.ArgumentParser
         Argument parser
@@ -432,6 +632,9 @@ def main(opts):
     # Determine polygon based on RSLC info or bbox
     poly = determine_polygon(opts.product, opts.bbox)
 
+    # Apply margin to the identified polygon in lat/lon
+    poly = apply_margin_polygon(poly, opts.margin)
+
     # Check dateline crossing. Returns list of polygons
     polys = check_dateline(poly)
 
@@ -444,15 +647,15 @@ def main(opts):
     else:
         # Check connection to AWS s3 nisar-dem bucket
         try:
-            check_aws_connection()
+            check_aws_connection(opts.version)
         except ImportError:
             import warnings
-            warnings.warn('boto3 is require to verify AWS connection'
+            warnings.warn('boto3 is require to verify AWS connection '
                           'proceeding without verifying connection')
         # Determine EPSG code
         epsg = determine_projection(polys)
         # Download DEM
-        download_dem(polys, epsg, opts.margin, opts.outfile)
+        download_dem(polys, epsg, opts.outfile, opts.version)
         print('Done, DEM store locally')
 
 

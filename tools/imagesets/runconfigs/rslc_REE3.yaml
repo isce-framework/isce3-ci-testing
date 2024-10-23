@@ -1,0 +1,156 @@
+runconfig:
+    name: NISAR_L1-L-RSLC_RUNCONFIG
+    groups:
+        pge_name_group:
+            pge_name: RSLC_L_PGE
+        input_file_group:
+            input_file_path:
+            - input_L0B_RRSD_REE3/NISAR_L0_PR_RRSD_104_159_D_238S_20251011T121909_20251011T122039_A00301_F_J_001.h5
+            qa_input_file: output_rslc/rslc.h5
+        dynamic_ancillary_file_group:
+            dem_file: input_L0B_RRSD_REE3/dem_90_09_945_16.tiff
+            orbit: input_L0B_RRSD_REE3/NISAR_ANC_L_PR_FOE_20240528T193920_20251011T121859_20251011T122049.xml
+            pointing: input_L0B_RRSD_REE3/NISAR_ANC_L_PR_FRP_20231207T182337_20251011T121909_20251011T122039.xml
+            external_calibration: input_L0B_RRSD_REE3/NISAR_LSAR_EXT_CAL_20220101T120000_03.yaml
+            internal_calibration: input_L0B_RRSD_REE3/NISAR_LSAR_INT_CAL_20220101T120000_01.h5
+            antenna_pattern: input_L0B_RRSD_REE3/NISAR_ANTPAT_20230707T142741.h5
+            corner_reflector_file: input_L0B_RRSD_REE3/NISAR_ANC_CORNER_REFLECTORS_005.csv
+        product_path_group:
+            product_path: output_rslc
+            scratch_path: scratch_rslc
+            sas_output_file: output_rslc/rslc.h5
+            sas_config_file: output_rslc/runconfig_rslc.yaml
+            qa_output_dir: qa_rslc
+            product_counter: 1
+        primary_executable:
+            product_type: RSLC
+            composite_release_id: A00301
+            mission_id: NISAR
+            processing_type: PR
+            product_accuracy: F
+        debug_level_group:
+            debug_switch: false
+        geometry:
+            cycle_number: 104
+            relative_orbit_number: 159
+            frame_number: 82
+            orbit_direction: Descending
+            track_frame_polygon: '{"type": "Polygon", "coordinates" : [[ ]] }'
+            full_coverage_threshold_percent: 75.0
+        worker:
+            gpu_enabled: True
+            gpu_id: 0
+        processing:
+            output_grid:
+                start_time: 2025-10-11T12:19:13
+                end_time: 2025-10-11T12:19:48
+                start_range:
+                end_range:
+                output_prf: 1520
+                time_snap_interval: 1.0
+            range_window:
+                kind: Kaiser
+                shape: 1.6
+            azimuth_window:
+                kind: Kaiser
+                shape: 0.0
+            radio_frequency_interference:
+                # Whether to attempt RFI detection and record related metadata.
+                # Defaults to True
+                detection_enabled: True
+                # Whether to attemt RFI removal. Default to False.
+                mitigation_enabled: False
+                # Algorithm selection.  Defaults to 'ST-EVD' for slow-time
+                # eigenvalue decomposition.
+                mitigation_algorithm: ST-EVD
+                # Number of subdivisions in range.  Defaults to 1.
+                num_range_blocks: 1
+                slow_time_evd:
+                    # Coherent processing interval length (pulses).  Defaults to 32.
+                    cpi_length: 32
+                    # Maximum allowable number of emitters can be detected and
+                    # suppressed per CPI. ST-EVD would ignore emitters exceeding
+                    # this limit. This number should be less than cpi_length.
+                    max_emitters: 16
+                    # Number of large value outliers to be trimmed in slow-time
+                    # minimum Eigenvalues.
+                    num_max_trim: 0
+                    # Number of small value outliers to be trimmed in slow-time
+                    # minimum Eigenvalues.
+                    num_min_trim: 0
+                    # A detection error (miss) happens when a maximum power RFI
+                    # emitter contaminates multiple consecutive CPIs, resulting in a
+                    # flat maximum Eigenvalue slope in slow time. Hence the standard
+                    # deviation (STD) of multiple dominant EVs across slow time
+                    # defined by this parameter are compared. The one with the
+                    # maximum STD is used for RFI Eigenvalue first difference
+                    # computation.
+                    max_num_rfi_ev: 2
+                    # Number of slow-time CPIs grouped together for determining and
+                    # applying a common EV slope threshold.
+                    num_cpi_per_threshold_block: 20
+                    # Parameters used to adaptively determine RFI eigenvalue
+                    # difference thresholds
+                    threshold_hyperparameters:
+                        # The computed sigma ratio of maximum and minimum Eigenvalue
+                        # first differences. It is a dimensionless figure of merit.
+                        # Larger value of x indicates higher likelihood of RFI
+                        # presence.
+                        x: [2.0, 20.0]
+                        # Estimated range of number of sigmas of the first
+                        # difference of minimum Eigenvalues across threshold block
+                        # as a function of input x, e.g., smaller x results in
+                        # larger value of y, therefore relaxing the final threshold.
+                        # The values of x outside of the defined range of y are
+                        # extrapolated.
+                        y: [5.0, 2.0]
+
+            range_common_band_filter:
+                attenuation: 40.0
+                width: 0.15
+            doppler:
+                azimuth_boresight_deg: 0.9
+                interp_method: bilinear
+                spacing:
+                    range: 2000.0
+                    azimuth: 1.0
+            rangecomp:
+                mode: full
+                block_size:
+                    range: 0
+                    azimuth: 1024
+            azcomp:
+                block_size:
+                    range: 32768
+                    azimuth: 1024
+                azimuth_resolution: 6.0
+                kernel:
+                    type: Knab
+                    halfwidth: 4
+                    approx_oversample: 1.7
+                    fit: Table
+                    fit_order: 2048
+            dry_troposphere_model: nodelay
+            dem:
+                reference_height: 0.0
+                interp_method: biquintic
+            nominal_antenna_size:
+                range: 12.0
+                azimuth: 12.0
+            encoding_scale_factor: 1.0
+            delete_tempfiles: True
+            is_enabled:
+                presum_blu: True
+                rangecomp: True
+                eap: True
+                range_cor: True
+                azcomp: True
+
+        qa:
+            workflows:
+                validate: True
+                qa_reports: True
+                absolute_radiometric_calibration: True
+                nes0: True
+                point_target_analyzer: True
+

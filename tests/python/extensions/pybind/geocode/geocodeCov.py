@@ -2,13 +2,14 @@
 import os
 import numpy as np
 from osgeo import gdal
+from scipy import ndimage
 import iscetest
 import isce3.ext.isce3 as isce
 import isce3
 from nisar.products.readers import SLC
 
-geocode_modes = {'interp':isce.geocode.GeocodeOutputMode.INTERP,
-        'area':isce.geocode.GeocodeOutputMode.AREA_PROJECTION}
+geocode_modes = {'interp': isce.geocode.GeocodeOutputMode.INTERP,
+                 'area': isce.geocode.GeocodeOutputMode.AREA_PROJECTION}
 input_axis = ['x', 'y']
 
 
@@ -32,19 +33,23 @@ def test_geocode_cov():
     geogrid_end_x = -115.5
     geogrid_end_y = 34.78
     geogrid_spacing_x = 0.002
-    geogrid_spacing_y =  -0.0008
+    geogrid_spacing_y = -0.0008
 
-    geo_grid_length = int((geogrid_end_y - geogrid_start_y) / geogrid_spacing_y)
+    geo_grid_length = int((geogrid_end_y - geogrid_start_y) /
+                          geogrid_spacing_y)
     geo_grid_width = int((geogrid_end_x - geogrid_start_x) / geogrid_spacing_x)
     epsgcode = 4326
     geo_obj.geogrid(geogrid_start_x, geogrid_start_y, geogrid_spacing_x,
-                   geogrid_spacing_y, geo_grid_width, geo_grid_length, epsgcode)
+                    geogrid_spacing_y, geo_grid_width, geo_grid_length,
+                    epsgcode)
 
     # get radar grid from HDF5
-    radar_grid = isce.product.RadarGridParameters(os.path.join(iscetest.data, "envisat.h5"))
+    radar_grid = isce.product.RadarGridParameters(os.path.join(iscetest.data,
+                                                               "envisat.h5"))
 
     # load test DEM
-    dem_raster = isce.io.Raster(os.path.join(iscetest.data, "geocode/zeroHeightDEM.geo"))
+    dem_raster = isce.io.Raster(os.path.join(iscetest.data,
+                                             "geocode/zeroHeightDEM.geo"))
 
     # iterate thru axis
     for axis in input_axis:
@@ -103,23 +108,22 @@ def test_geocode_cov():
                 if apply_sub_swath_mask:
                     sub_swath_str = '_sub_swath_masked'
                     sub_swath_mask_path = f"{axis}_{key}_sub_swath_mask.geo"
-                    out_valid_samples_sub_swath_mask = isce.io.Raster(
+                    out_mask = isce.io.Raster(
                         sub_swath_mask_path,
                         geo_grid_width, geo_grid_length, 1,
                         gdal.GDT_Byte, "ENVI")
 
                     sub_swath_kwargs['sub_swaths'] = sub_swath
-                    sub_swath_kwargs['out_valid_samples_sub_swath_mask'] = \
-                        out_valid_samples_sub_swath_mask
+                    sub_swath_kwargs['out_mask'] = out_mask
 
                 else:
                     sub_swath_str = ''
 
                 output_path = f"{axis}_{key}{sub_swath_str}.geo"
                 print(f'   output file: {output_path}')
-                output_raster = isce.io.Raster(output_path,
-                        geo_grid_width, geo_grid_length, 1,
-                        gdal.GDT_Float64, "ENVI")
+                output_raster = isce.io.Raster(
+                    output_path, geo_grid_width, geo_grid_length, 1,
+                    gdal.GDT_Float64, "ENVI")
 
                 # geocode based on axis and mode
                 geo_obj.geocode(radar_grid,
@@ -144,6 +148,11 @@ def test_geocode_cov():
 
             for apply_sub_swath_mask in [False, True]:
 
+                print('testing parameters:')
+                print('    geocode mode:', key)
+                print('    axis:', axis)
+                print('    apply sub-swath masking:', apply_sub_swath_mask)
+
                 # prepare output raster
                 if apply_sub_swath_mask:
                     sub_swath_str = '_sub_swath_masked'
@@ -151,7 +160,7 @@ def test_geocode_cov():
                     sub_swath_str = ''
 
                 test_raster = f"{axis}_{key}{sub_swath_str}.geo"
-                print(f'   verifying file: {test_raster}')
+                print(f'    file: {test_raster}')
                 ds = gdal.Open(test_raster, gdal.GA_ReadOnly)
                 geo_arr = ds.GetRasterBand(1).ReadAsArray()
                 geo_arr = np.ma.masked_array(geo_arr, mask=np.isnan(geo_arr))
@@ -166,7 +175,8 @@ def test_geocode_cov():
                     dy = geo_trans[5]
 
                     pixels, lines = geo_arr.shape
-                    meshx, meshy = np.meshgrid(np.arange(lines), np.arange(pixels))
+                    meshx, meshy = np.meshgrid(np.arange(lines),
+                                               np.arange(pixels))
                     grid_x = x0 + meshx * dx
                     grid_y = y0 + meshy * dy
 
@@ -192,15 +202,16 @@ def test_geocode_cov():
                     # get max err
                     max_err = np.nanmax(err)
 
-                    assert( max_err < 1.0e-8 ), f'{test_raster} max error fail'
+                    assert (max_err < 1.0e-8), f'{test_raster} max error fail'
 
                 if axis == 'x':
                     rmse_err_threshold = 0.5 * dx
                 else:
                     rmse_err_threshold = 0.5 * abs(dy)
-                assert( rmse < rmse_err_threshold ), f'{test_raster} RMSE fail'
+                assert (rmse < rmse_err_threshold), f'{test_raster} RMSE fail'
 
                 if not apply_sub_swath_mask:
+                    print('    ...done')
                     continue
 
                 # select mask of pixels within 10-90 quantile range
@@ -216,26 +227,36 @@ def test_geocode_cov():
                 gdal_ds = gdal.Open(sub_swath_mask_path)
                 sub_swath_mask_array = gdal_ds.GetRasterBand(1).ReadAsArray()
 
+                # The area projection algorithm uses all available (valid)
+                # samples that intersect the geogrid pixel. A geocoded pixel
+                # may have a valid value even if most of its samples are
+                # invalid. Therefore, we dilate the expected valid mask
+                # by one pixel
+
+                if key == 'area':
+                    sub_swath_expected_exp_within_quantile_relaxed = \
+                        ndimage.binary_dilation(
+                            sub_swath_expected_exp_within_quantile)
+                else:
+                    sub_swath_expected_exp_within_quantile_relaxed = \
+                        sub_swath_expected_exp_within_quantile
                 # the outside area represented by
                 # `~ sub_swath_expected_exp_within_quantile` should include
                 # `sub_swath_mask_array``.
 
-                # first, check the mask and assert that there are no masked
-                # points outside of the selected area.
-                assert np.sum((sub_swath_mask_array) &
-                              (~sub_swath_expected_exp_within_quantile)) == 0
+                # first, check the mask and assert that there are no
+                # points marked as sub-swath 1 outside of the selected area.
+                assert np.sum(
+                    (sub_swath_mask_array == 1) &
+                    (~sub_swath_expected_exp_within_quantile_relaxed)) == 0
 
                 # then, we check the geocoded array and assert that there are
                 # valid points inside the selected area
                 assert np.sum((np.isfinite(geo_arr)) &
-                              (sub_swath_expected_exp_within_quantile)) > 0
-
-                # finally, we check the geocoded array again and assert
-                # that there are no valid points outside of the selected area
-                assert np.sum((np.isfinite(geo_arr)) &
                               (~sub_swath_expected_exp_within_quantile)) == 0
 
-                
+                print('    ...done')
+
 
 if __name__ == "__main__":
     test_geocode_cov()

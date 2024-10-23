@@ -27,11 +27,28 @@ static py::buffer_info toBuffer(const std::vector<isce3::core::Vec3>& buf)
     return {(void*) buf.data(), sizeof(double), format, 2, shape, strides, readonly};
 }
 
+void addbinding(pybind11::enum_<isce3::core::OrbitInterpMethod> & pyOrbitInterpMethod)
+{
+    pyOrbitInterpMethod
+        .value("HERMITE", isce3::core::OrbitInterpMethod::Hermite)
+        .value("LEGENDRE", isce3::core::OrbitInterpMethod::Legendre);
+}
+
+
 void addbinding(py::class_<Orbit> & pyOrbit)
 {
     pyOrbit
-        .def(py::init<std::vector<StateVector>>())
-        .def(py::init<std::vector<StateVector>, isce3::core::DateTime>())
+        .def(py::init<std::vector<StateVector>, isce3::core::OrbitInterpMethod,
+             std::string>(),
+                py::arg("state_vectors"),
+                py::arg("interp_method")=isce3::core::OrbitInterpMethod::Hermite,
+                py::arg("type") = "")
+        .def(py::init<std::vector<StateVector>, isce3::core::DateTime,
+             isce3::core::OrbitInterpMethod, std::string>(),
+                py::arg("state_vectors"),
+                py::arg("date_time"),
+                py::arg("interp_method")=isce3::core::OrbitInterpMethod::Hermite,
+                py::arg("type") = "")
         .def_property_readonly("reference_epoch",
                 py::overload_cast<>(&Orbit::referenceEpoch, py::const_))
         // add a function rather than just a settable property since
@@ -81,6 +98,7 @@ void addbinding(py::class_<Orbit> & pyOrbit)
         .def_property_readonly("spacing",        &Orbit::spacing)
         .def_property_readonly("size",           &Orbit::size)
         .def_property_readonly("start_time",     &Orbit::startTime)
+        .def_property_readonly("mid_time",       &Orbit::midTime)
         .def_property_readonly("end_time",       &Orbit::endTime)
         .def_property_readonly("start_datetime", &Orbit::startDateTime)
         .def_property_readonly("mid_datetime",   &Orbit::midDateTime)
@@ -97,5 +115,74 @@ void addbinding(py::class_<Orbit> & pyOrbit)
         .def("contains", &Orbit::contains,
             "Check if time falls in the valid interpolation domain.",
             py::arg("time"))
-        ;
+
+        .def("crop", &Orbit::crop,
+            R"(
+            Create a new Orbit containing data in the requested interval
+
+            Parameters
+            ----------
+            start : isce3.core.DateTime
+                Beginning of time interval
+            end : isce3.core.DateTime
+                End of time interval
+            npad : int, optional
+                Minimal number of state vectors to include past each of
+                the given time bounds (useful to guarantee adequate
+                support for interpolation).
+
+            Returns
+            -------
+            isce3.core.Orbit
+                Orbit object with data containing start & end times)",
+            py::arg("start"), py::arg("end"), py::arg("npad") = 0)
+        .def("set_interp_method", [](Orbit& self, const std::string& method) {
+            if (method == "Hermite") {
+                self.interpMethod(OrbitInterpMethod::Hermite);
+            } else if (method == "Legendre") {
+                self.interpMethod(OrbitInterpMethod::Legendre);
+            } else {
+                throw std::invalid_argument("unexpected orbit interpolation method '" + method + "'");
+            }
+        }, R"(
+        Set interpolation method.
+
+        Parameters
+        ----------
+        method : {'Hermite', 'Legendre'}
+            The method for interpolating orbit state vectors (cubic
+            Hermite spline interpolation or eighth-order Legendre
+            polynomial interpolation).
+        )",
+        py::arg("method"))
+        .def("get_interp_method", [](Orbit& self) {
+            return self.interpMethod();
+        }, R"(
+        Get interpolation method.
+
+        Returns
+        -------
+        orbit_method: isce3.core.OrbitInterpMethod
+            The method for interpolating orbit state vectors (cubic
+            Hermite spline interpolation or eighth-order Legendre
+            polynomial interpolation).
+        )")
+        .def("set_type", py::overload_cast<const std::string&>(&Orbit::type),
+        py::arg("type"), R"(
+        Set orbit type.
+
+        Parameters
+        ----------
+        type : str
+            The orbit ephemeris precision type. Example: "FOE", "NOE",
+            "MOE", "POE", or "Custom".
+        )")
+       .def("get_type", py::overload_cast<>(&Orbit::type, py::const_), R"(
+        Get orbit ephemeris precision type.
+
+        Returns
+        -------
+        type : str
+            The orbit ephemeris precision type.
+        )");
 }

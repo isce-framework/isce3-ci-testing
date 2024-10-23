@@ -7,13 +7,15 @@ runconfig:
 
         input_file_group:
             # REQUIRED - Two NISAR L1 RSLC formatted HDF5 files
-            reference_rslc_file: @ISCETEST@/Sdelta_129_02.h5
-            secondary_rslc_file: @ISCETEST@/Sdelta_138_02.h5
+            reference_rslc_file: @ISCETEST@/SanAnd_129.h5
+            secondary_rslc_file: @ISCETEST@/SanAnd_138.h5
 
         dynamic_ancillary_file_group:
             # REQUIRED - Use the provided DEM as input
-            dem_file: @ISCETEST@/Sdelta_dem.tif
-
+            dem_file: @ISCETEST@/SanAnd_dem.tif
+            orbit_files:
+                reference_orbit_file:
+                secondary_orbit_file:
         product_path_group:
             # REQUIRED - Directory where PGE will place results. Irrelevant to SAS.
             product_path: '.'
@@ -101,15 +103,16 @@ runconfig:
                 lines_per_block: 1000
                 window_function: tukey
                 window_shape: 0.25
-                range_fft_size: 
-                
+                range_fft_size:
+
             geo2rdr:
                 topo_path: '.'
                 threshold: 1.0e-9
                 maxiter: 25
 
             coarse_resample:
-                lines_per_tile: 100
+                lines_per_tile: 1000
+                columns_per_tile: 1000
 
             dense_offsets:
                 enabled: False
@@ -140,3 +143,7 @@ runconfig:
             phase_unwrap:
                 crossmul_path:
                 algorithm: icu
+
+        output:
+            compression_enabled: False
+            chunk_size: [16, 16]

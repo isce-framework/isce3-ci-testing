@@ -1,12 +1,12 @@
 from .DataDecoder import DataDecoder
 import h5py
 import isce3
+from isce3.focus import RadarPoint, RadarBoundingBox
 import logging
 from nisar.products.readers import Base
 import numpy as np
 import pyre
 import journal
-import isce3
 import re
 from warnings import warn
 from scipy.interpolate import interp1d
@@ -162,7 +162,7 @@ class RawBase(Base, family='nisar.productreader.raw'):
     def getOrbit(self):
         path = f"{self.TelemetryPath}/orbit"
         with h5py.File(self.filename, 'r', libver='latest', swmr=True) as f:
-            orbit = isce3.core.Orbit.load_from_h5(f[path])
+            orbit = isce3.core.load_orbit_from_h5_group(f[path])
         return orbit
 
     def getAttitude(self):
@@ -183,18 +183,25 @@ class RawBase(Base, family='nisar.productreader.raw'):
         return out
 
 
-    def getPulseTimes(self, frequency='A', tx='H'):
+    def getPulseTimes(self, frequency=None, tx=None, epoch=None):
         """
         Read pulse time tags.
 
         Parameters
         ----------
-        frequency : {'A', 'B'}
+        frequency : {'A', 'B'}, optional
             Sub-band.  Typically main science band is 'A'.
+            Default is the first frequency in self.frequencies.
 
-        tx : {'H', 'V', 'L', 'R'}
+        tx : {'H', 'V', 'L', 'R'}, optional
             Transmit polarization.  Abbreviations correspond to horizontal
             (linear), vertical (linear), left circular, right circular
+            Default is the first pol under `frequency`.
+
+        epoch : isce3.core.DateTime, optional
+            Desired time reference.  If not provided the one from the file
+            metadata will be used.  The absolute time stamps (epoch + t) are
+            identical in either case.
 
         Returns
         -------
@@ -204,12 +211,19 @@ class RawBase(Base, family='nisar.productreader.raw'):
         t : array_like
             Transmit time of each pulse, in seconds relative to epoch.
         """
+        if frequency is None:
+            frequency = sorted(self.frequencies)[0]
+        if tx is None:
+            tx = self.polarizations[frequency][0][0]
         txpath = self.TransmitPath(frequency, tx)
         with h5py.File(self.filename, 'r', libver='latest', swmr=True) as f:
             # FIXME product spec changed UTCTime -> UTCtime
             name = find_case_insensitive(f[txpath], "UTCtime")
             t = np.asarray(f[txpath][name])
-            epoch = isce3.io.get_ref_epoch(f[txpath], name)
+            file_epoch = isce3.io.get_ref_epoch(f[txpath], name)
+        if epoch is None:
+            return file_epoch, t
+        t += (file_epoch - epoch).total_seconds()
         return epoch, t
 
     def getNominalPRF(self, frequency='A', tx='H'):
@@ -233,7 +247,7 @@ class RawBase(Base, family='nisar.productreader.raw'):
         _, az_time = self.getPulseTimes(frequency, tx)
         return (az_time.size - 1) / (az_time[-1] - az_time[0])
 
-    def isDithered(self, frequency='A', tx=None):
+    def isDithered(self, frequency='A', tx=None, tol=1e-8, num_ignore=0):
         """Whether or not PRF is dithering.
 
         That is more than one PRF value within entire azimuth duration.
@@ -248,6 +262,14 @@ class RawBase(Base, family='nisar.productreader.raw'):
             (linear), vertical (linear), left circular, right circular
             Default is the first pol under `frequency`.
 
+        tol : float, optional
+            Tolerance for PRI comparisons in seconds.  Default is less than
+            NISAR's 100 ns clock tics.
+
+        num_ignore : int, optional
+            The dataset is only considered dithered when more than num_ignore
+            consecutive PRIs are not equal.
+
         Returns
         -------
         bool
@@ -257,9 +279,10 @@ class RawBase(Base, family='nisar.productreader.raw'):
         if tx is None:
             tx = self.polarizations[frequency][0][0]
         _, az_time = self.getPulseTimes(frequency, tx)
-        tm_diff = np.diff(az_time)
-        return not np.isclose(tm_diff.min(), tm_diff.max())
-        
+        pri = np.diff(az_time)
+        is_unequal = np.abs(np.diff(pri)) > tol
+        return np.sum(is_unequal) > num_ignore
+
 
     def getCenterFrequency(self, frequency: str = 'A', tx: str = None):
         if tx is None:
@@ -528,6 +551,37 @@ class RawBase(Base, family='nisar.productreader.raw'):
         with h5py.File(self.filename, 'r', libver='latest', swmr=True) as fid:
             return fid[path_txrx]["WL"][()]
 
+    def getSampleRateDBF(self, frequency="A", polarization=None):
+        """
+        Get sample rate corresponding to RD, WD, WL timing metadata.  For
+        NISAR this is always 240 MHz, but it may be different for simulated
+        datasets.
+
+        Parameters
+        ----------
+        frequency : {'A', 'B'}
+            Sub-band.  Typically main science band is 'A'.
+        polarization : {'HH', 'HV', 'VH', 'VV', 'RH','RV', 'LH', 'LV'}, optional
+            Transmit-Receive polarization. If not specified, the first
+            polarization in the `frequency` band will be used.
+
+        Returns
+        -------
+        fs : float
+            Sample rate in Hz
+        """
+        if polarization is None:
+            polarization = self.polarizations[frequency][0]
+        path_txrx = self._rawGroup(frequency, polarization)
+        with h5py.File(self.filename, 'r', libver='latest', swmr=True) as fid:
+            group = fid[path_txrx]
+            key = "sampleRateDBF"
+            if key in group:
+                return group[key][()]
+            else:
+                log.info("sampleRateDBF not found in L0B, assuming 240 MHz")
+                return 240e6
+
     def getRdWdWl(self, frequency='A', polarization=None):
         """
         Get all three DBF-related parameters "RD", "WD", and "WL" in one
@@ -564,13 +618,41 @@ class RawBase(Base, family='nisar.productreader.raw'):
             return (fid[path_txrx]["RD"][()], fid[path_txrx]["WD"][()],
                     fid[path_txrx]["WL"][()])
 
-    # XXX C++ and Base.py assume SLC.  Grid less well defined for Raw case
-    # since PRF isn't necessarily constant.  Return pulse times with grid?
-    def getRadarGrid(self, frequency='A', tx='H', prf=None):
+    def getRadarGrid(self, frequency='A', tx='H', prf=None, epoch=None):
+        """
+        Return the timestamps and radar grid for the raw data.  Since the actual
+        azimuth grid may be irregular due to PRF dithering, the azimuth grid
+        metadata will be filled with nominal values according to the optional
+        `prf` parameter.
+
+        Parameters
+        ----------
+        frequency : {'A', 'B'}, optional
+            Sub-band.  Typically main science band is 'A'.
+        tx : {'H', 'V'}, optional
+            Transmit polarization.  Abbreviations correspond to horizontal
+            (linear), vertical (linear). Defaults to 'H'.
+        prf : float, optional
+            Pulse repetition frequency in Hz.  If provided, use as grid.prf and
+            set grid.length to match the total time span.  If not provided,
+            then grid.length is equal to number of pulses and grid.prf is the
+            inverse of the mean pulse interval.
+        epoch : isce3.core.DateTime, optional
+            Desired time reference.  If not provided the one from the file
+            metadata will be used.  The absolute time stamps (epoch + t) are
+            identical in either case.
+
+        Returns
+        -------
+        t : np.ndarray[float]
+            Time of each pulse in seconds relative to grid.ref_epoch.
+        grid : isce3.product.RadarGridParameters
+            Grid parameters describing posting of raw data.
+        """
         fc = self.getCenterFrequency(frequency, tx)
         wvl = isce3.core.speed_of_light / fc
         r = self.getRanges(frequency, tx)
-        epoch, t = self.getPulseTimes(frequency, tx)
+        epoch, t = self.getPulseTimes(frequency, tx, epoch=epoch)
         nt = len(t)
         assert nt > 1
         if prf:
@@ -601,75 +683,80 @@ class RawBase(Base, family='nisar.productreader.raw'):
                 swaths[i, ...] = f[txpath][name][:]
         return swaths
 
+
+    def getSubSwathBboxes(self, frequency, tx=None, epoch=None):
+        """
+        Return the bounding box for each sub-swath.
+
+        Parameters
+        ----------
+        frequency : {"A", "B"}
+            Sub-band identifier.
+        tx : {"H", "V", "L", "R"} | None
+            Transmit polarization. If None, use first available TX polarization.
+        epoch : isce3.core.DateTime
+            Reference epoch for azimuth time tags.
+
+        Returns
+        -------
+        bboxes : list[RadarBoundingBox]
+            Bounding box in radar coordinates for each sub-swath.
+        """
+        if tx is None:
+            tx = self.polarizations[frequency][0][0]
+        times, grid = self.getRadarGrid(frequency, tx, epoch=epoch)
+
+        # If dithered we can reconstruct the entire swath.
+        if self.isDithered(frequency):
+            bbox = RadarBoundingBox(
+                RadarPoint(times[0], grid.slant_ranges[0]),
+                RadarPoint(times[-1], grid.slant_ranges[-1]))
+            return [bbox]
+
+        # Otherwise the TX gaps split the swath into sub-swaths.
+        bboxes = []
+        for swath in self.getSubSwaths(frequency, tx=tx):
+            # For fixed PRF the gap locations should be constant (one unique
+            # pair of [start, stop) indices).
+            if len(np.unique(swath, axis=0)) > 1:
+                log.warning("Variable raw subswaths detected!  Only "
+                    "the swath bounds at the azimuth midpoint will be used.")
+
+            # XXX Careful because radar can transition from constant PRF to
+            # XXX dithered PRF, so the pulses in the air at the end will cause
+            # XXX variations in the gap locations at the end.
+            imid = swath.shape[0] // 2
+            istart, iend = swath[imid, :]
+
+            r = np.array(grid.slant_ranges)
+            n = len(r)
+
+            # This transition can also force the introduction of a mostly
+            # empty subswath that's only needed at the end (e.g., only two
+            # gaps except dithering introduces a third).
+            # XXX Empty subswaths should be detectable by istart==iend, but
+            # XXX currently L0B can be populated with weird stuff like
+            # XXX [istart, fillValue) or [fillValue, n) where istart < n and
+            # XXX fillValue > n.  So handle that until L0B writer is fixed.
+            istart = min(istart, n)
+            iend = min(iend, n)
+            if istart >= iend:
+                log.warning(f"Excluding subswath with bounds {swath[imid, :]}.")
+                continue
+
+            bbox = RadarBoundingBox(
+                RadarPoint(times[0], r[istart]),
+                RadarPoint(times[-1], r[iend - 1]))
+            bboxes.append(bbox)
+        return bboxes
+
+
     def getProductLevel(self):
         '''
         Returns the product level
         '''
         return "L0B"
 
-
-    def computeTxCalRatio(self, frequency='A', tx=None):
-        """Get TX-path multi-channel complex weighting over all range lines.
-
-        Tx-path complex weighting is defined as ratio of HPA CAL to
-        BYPASS CAL for all channels over all range lines.
-
-        Parameters
-        ----------
-        frequency : {'A', 'B'}
-            Sub-band.  Typically main science band is 'A'.
-        tx : {'H', 'V'}, optional
-            Transmit polarization. If not specified, the first
-            polarization in the `frequency` band will be used.
-
-        Returns
-        -------
-        np.ndarray(complex)
-            2-D complex float of HPA /BYPASS Calibration,
-            size = [rangelines x channels].
-
-        Raises
-        ------
-        RunTimeError
-            For missing HPA Cal data.
-            For any zero-value BYPASS Cal data.
-
-        Warnings
-        -----
-        Issue warning message if BYPASS Cal data is missing. In that case,
-        HPA Cal data will be simply used to represent TX path weights.
-        """
-        if tx is None:
-            tx = self.polarizations[frequency][0][0]
-        # Read calibration chirp correlator and extract middle (peak) tap.
-        cal = self.getChirpCorrelator(frequency, tx)[:, :, 1]
-        # Demux the different calibration paths.
-        kind = self.getCalType(frequency, tx)
-        i_all = np.arange(cal.shape[0])
-        i_hpa = np.where(kind == CalPath.HPA)[0]
-        if i_hpa.size == 0:
-            raise RuntimeError("No HPA calibration data are available.")
-        i_byp = np.where(kind == CalPath.BYPASS)[0]
-        # Upsample each one to all pulses using (causal) nearest neighbor.
-        hcal = _interp_previous(i_all, i_hpa, cal[i_hpa])
-        if i_byp.size > 0:
-            bcal = _interp_previous(i_all, i_byp, cal[i_byp])
-            if np.isclose(abs(bcal).min(), 0):
-                raise RuntimeError(
-                    'Encountered some zero values for BYPASS cal data!')
-        else:
-            # Some simulated data are missing BCAL pulses.
-            bcal = np.ones_like(hcal)
-            warn("No BYPASS calibration data are available."
-                "  Assuming it is constant in time and equal on all channels.")
-        # Return ratio at all pulses.
-        return hcal / bcal
-
-
-def _interp_previous(xout, x, y, axis=0):
-    """1-D interpolation based on "previous" method along a desired axis"""
-    f = interp1d(x, y, kind='previous', axis=axis, fill_value='extrapolate')
-    return f(xout)
 
 # adapted from ReeUtilPy/REEout/AntPatAnalysis.py:getDCMant2sc
 def get_rcs2body(el_deg=37.0, az_deg=0.0, side='left') -> isce3.core.Quaternion:

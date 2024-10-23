@@ -40,8 +40,8 @@ dataInterpMethod parseDataInterpMethod(const std::string & method);
 /** Semi-major axis for WGS84 */
 const double EarthSemiMajorAxis = 6378137.0;
 
-/** Eccentricity^2 for WGS84 */
-const double EarthEccentricitySquared = 0.0066943799901;
+/** Eccentricity^2 for WGS84 derived from inverse flattening 298.257223563 */
+const double EarthEccentricitySquared = 0.006694379990141317;
 
 /** Spin rate of Earth used for ECI/ECEF conversions, rad/s */
 constexpr static double EarthSpinRate = 7.292115024135738e-5;
@@ -55,14 +55,10 @@ const double GLOBAL_MIN_HEIGHT = -500.0;
 /** Global maximum height */
 const double GLOBAL_MAX_HEIGHT = 9000.0;
 
-/** Struct with fixed-length string for serialization */
-struct FixedString {
-    char str[50];
-};
-
 /** Layover and shadow values */
 const short SHADOW_VALUE = 1;
 const short LAYOVER_VALUE = 2;
+const short LAYOVER_AND_SHADOW_VALUE = 3;
 
 /** Area projection algorithm radar grid margin **/
 const int AREA_PROJECTION_RADAR_GRID_MARGIN = 100;

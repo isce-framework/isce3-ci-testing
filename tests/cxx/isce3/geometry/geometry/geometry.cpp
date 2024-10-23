@@ -29,6 +29,7 @@
 
 // isce3::geometry
 #include <isce3/geometry/DEMInterpolator.h>
+#include <isce3/geometry/geo2rdr_roots.h>
 #include <isce3/geometry/geometry.h>
 
 // Declaration for utility function to read test data
@@ -153,6 +154,28 @@ TEST_F(GeometryTest, GeoToRdr)
     ASSERT_EQ(stat, 1);
     ASSERT_EQ(azdate.isoformat(), "2003-02-26T17:55:34.122893704");
     ASSERT_NEAR(slantRange, 830449.6727720434, 1.0e-6);
+
+    // Repeat with bracketing algorithm.
+    auto xyz = ellipsoid.lonLatToXyz(llh);
+    stat = isce3::geometry::geo2rdr_bracket(xyz, orbit, zeroDoppler, aztime,
+            slantRange, swath.processedWavelength(), lookSide, 1e-10);
+    azdate = orbit.referenceEpoch() + aztime;
+
+    EXPECT_EQ(stat, 1);
+    EXPECT_EQ(azdate.isoformat(), "2003-02-26T17:55:34.122893704");
+    EXPECT_NEAR(slantRange, 830449.6727720434, 1.0e-6);
+
+    // Repeat with custom bracket.  The default run above searches the whole
+    // 600 seconds of orbit data, which takes 6 iterations.  The run below
+    // with a 2 second interval converges in 3 iterations.
+    double t0 = aztime - 1, t1 = aztime + 1;
+    stat = isce3::geometry::geo2rdr_bracket(xyz, orbit, zeroDoppler, aztime,
+            slantRange, swath.processedWavelength(), lookSide, 1e-10, t0, t1);
+    azdate = orbit.referenceEpoch() + aztime;
+
+    EXPECT_EQ(stat, 1);
+    EXPECT_EQ(azdate.isoformat(), "2003-02-26T17:55:34.122893704");
+    EXPECT_NEAR(slantRange, 830449.6727720434, 1.0e-6);
 }
 
 TEST(Geometry, SrLkvHeadDemNed)
@@ -173,37 +196,37 @@ TEST(Geometry, SrLkvHeadDemNed)
     // https://github.jpl.nasa.gov/SALSA-REE
     // clang-format off
   //(m,m,m)
-  sc_pos_ecf <<    
+  sc_pos_ecf <<
     -2434573.803881911095,
     -4820642.065286534838,
     4646722.940369521268;
   //(m/s,m/s,m/s)
-  sc_vel_ecf <<   
+  sc_vel_ecf <<
     522.995925360679,
     5107.808531616465,
     5558.156209869601;
   //(rad,rad,m)
-  sc_pos_llh <<   
+  sc_pos_llh <<
     -116.795192003152*d2r,
     40.879509088888*d2r,
     755431.529907600489;
   //(-,-,-)
-  pnt_ecf <<   
+  pnt_ecf <<
     -0.292971223572,
     0.707071773397,
     -0.643597210547;
   //(m,m,m)
-  est_loc_ecf <<  
+  est_loc_ecf <<
     -2721427.049702467397,
     -4128335.733102159109,
     4016565.662138461601;
   //(deg,deg,m)
-  est_loc_llh <<  
+  est_loc_llh <<
     -123.3931,
     39.2757,
     799.7505;
   //(m/s,m/s,m/s)
-  est_sc_vel_ned << 
+  est_sc_vel_ned <<
     7340.716338644244,
     -1835.775025245533,
     -12.119371107411;
@@ -226,7 +249,7 @@ TEST(Geometry, SrLkvHeadDemNed)
     auto hgt_info = srPosFromLookVecDem(sr_dem, loc_ecf, loc_llh, sc_pos_ecf,
             pnt_ecf, DEMInterpolator(dem_hgt), hgt_err, num_iter, wgs84);
     EXPECT_LE(hgt_info.first, num_iter)
-            << "Wrong number of itration for DEM height";
+            << "Wrong number of iterations for DEM height";
     EXPECT_LE(hgt_info.second, hgt_err) << "Wrong height error for DEM height";
     EXPECT_NEAR(sr_dem, 979117.2, hgt_err) << "Wrong slant range at DEM height";
     EXPECT_NEAR((loc_ecf - est_loc_ecf).cwiseAbs().maxCoeff(), 0.0, hgt_err)
@@ -237,6 +260,25 @@ TEST(Geometry, SrLkvHeadDemNed)
             << "Wrong (Lon,lat) location at DEM height";
     EXPECT_NEAR(std::abs(loc_llh(2) - est_loc_llh(2)), 0.0, hgt_err)
             << "Wrong (Lon,lat) location at DEM height";
+
+    // use mean DEM in place of optional arg in "srPosFromLookVecDem"
+    auto hgt_mean_info = srPosFromLookVecDem(sr_dem, loc_ecf, loc_llh,
+            sc_pos_ecf, pnt_ecf, DEMInterpolator(dem_hgt), hgt_err, num_iter,
+            wgs84, dem_hgt);
+    EXPECT_LE(hgt_mean_info.first, num_iter)
+            << "Wrong number of iterations for mean DEM height";
+    EXPECT_LE(hgt_mean_info.second, hgt_err)
+            << "Wrong height error for mean DEM height";
+    EXPECT_NEAR(sr_dem, 979117.2, hgt_err)
+            << "Wrong slant range at mean DEM height";
+    EXPECT_NEAR((loc_ecf - est_loc_ecf).cwiseAbs().maxCoeff(), 0.0, hgt_err)
+            << "Wrong ECEF location at mean DEM height";
+    EXPECT_NEAR(
+            (r2d * loc_llh.head(2) - est_loc_llh.head(2)).cwiseAbs().maxCoeff(),
+            0.0, abs_err)
+            << "Wrong (Lon,lat) location at mean DEM height";
+    EXPECT_NEAR(std::abs(loc_llh(2) - est_loc_llh(2)), 0.0, hgt_err)
+            << "Wrong (Lon,lat) location at mean DEM height";
 
     // "necVector" , "nuwVector" , "enuVector"  methods
     auto sc_vel_ned {nedVector(sc_pos_llh(0), sc_pos_llh(1), sc_vel_ecf)};

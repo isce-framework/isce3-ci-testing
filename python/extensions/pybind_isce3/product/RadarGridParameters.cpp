@@ -5,6 +5,7 @@
 
 #include <isce3/core/DateTime.h>
 #include <isce3/core/LookSide.h>
+#include <isce3/core/Linspace.h>
 #include <isce3/product/RadarGridProduct.h>
 
 namespace py = pybind11;
@@ -76,6 +77,12 @@ void addbinding(pybind11::class_<RadarGridParameters> & pyRadarGridParameters)
                 py::overload_cast<const double&>(&RadarGridParameters::sensingStart))
         .def_property_readonly("sensing_mid", &RadarGridParameters::sensingMid)
         .def_property_readonly("sensing_stop", &RadarGridParameters::sensingStop)
+        .def("sensing_time", &RadarGridParameters::sensingTime,
+                py::arg("line"))
+        .def_property_readonly("sensing_times", [](const RadarGridParameters& self) {
+                return isce3::core::Linspace(self.sensingStart(),
+                        1.0 / self.prf(), self.length());
+        })
         .def_property("ref_epoch",
                 py::overload_cast<>(&RadarGridParameters::refEpoch, py::const_),
                 py::overload_cast<const DateTime &>(&RadarGridParameters::refEpoch))
@@ -103,6 +110,18 @@ void addbinding(pybind11::class_<RadarGridParameters> & pyRadarGridParameters)
                 py::arg("azlooks"), py::arg("rglooks"))
         .def("slant_range", &RadarGridParameters::slantRange,
                 py::arg("sample"))
+        .def("slant_range_index", &RadarGridParameters::slantRangeIndex,
+                py::arg("slant_range"))
+        .def_property_readonly("slant_ranges", [](const RadarGridParameters& self) {
+                return isce3::core::Linspace(self.startingRange(),
+                        self.rangePixelSpacing(), self.width());
+        })
+        .def_property_readonly("sensing_times", [](const RadarGridParameters& self) {
+                return isce3::core::Linspace(self.sensingStart(),
+                        1.0 / self.prf(), self.length());
+        })
+        .def("azimuth_index", &RadarGridParameters::azimuthIndex,
+                py::arg("az_time"))
         // slice to get subset of RGP
         .def("__getitem__", [](const RadarGridParameters& self, py::tuple key) {
                 if (key.size() != 2) {
@@ -134,6 +153,47 @@ void addbinding(pybind11::class_<RadarGridParameters> & pyRadarGridParameters)
         .def("copy", [](const RadarGridParameters& self) {
                 return RadarGridParameters(self);
         })
+        // resize the radar grid with with the start and stop points kept
+        .def("resize_and_keep_startstop", &RadarGridParameters::resizeKeepStartStop,
+                py::arg("ysize"),
+                py::arg("xsize"), R"(
+        Resize the RadarGridParameters object by using the ysize and xsize, and
+        the start and stop points are kept.
+
+        Parameters
+        ----------
+        ysize : int
+          The number of samples along the azimuth direction. Must be >1.
+        xsize : int
+          The number of samples along the slant range direction. Must be >1.
+
+        Returns
+        -------
+        RadarGridParameters
+          The resized radar grid.
+            )")
+        // add margins to the radar grid
+        .def("add_margin", &RadarGridParameters::addMargin,
+                py::arg("ymargin"),
+                py::arg("xmargin"),
+                py::arg("side") = "both",  R"(
+        Add margins to the RadarGridParameters object
+
+        Parameters
+        ----------
+        ymargin : int
+          The number of samples along the azimuth. Must be >0.
+        xmargin : int
+          The number of samples along the slant range. Must be >0.
+        side : str
+          The side where the margin will be added, and
+          options are 'start', 'stop', and 'both'. Defaults to 'both'.
+
+        Returns
+        -------
+        RadarGridParameters
+          The radar grid with the margins added.
+            )")
         .def_property_readonly("shape", [](const RadarGridParameters& self) {
                 auto shape = py::tuple(2);
                 shape[0] = self.length();
@@ -156,6 +216,9 @@ void addbinding(pybind11::class_<RadarGridParameters> & pyRadarGridParameters)
                 return out + ")";
         })
         .def("sensing_datetime", &RadarGridParameters::sensingDateTime,
-                py::arg("line") = 0);
+                py::arg("line") = 0)
+        .def("contains", &RadarGridParameters::contains,
+                py::arg("azimuth_time"),
+                py::arg("slant_range"))
         ;
 }

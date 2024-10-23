@@ -7,6 +7,7 @@ core/datetime_.py
 core/ellipsoid.py
 core/euler.py
 core/interp1d.py
+core/interp2d.py
 core/kernels.py
 core/linspace.py
 core/LUT1d.py
@@ -21,7 +22,6 @@ focus/backproject.py
 focus/chirp.py
 focus/presum.py
 focus/rangecomp.py
-geocode/geocodeSlc.py
 geocode/geocodeCov.py
 geocode/radar_grid_cube.py
 geometry/bbox.py
@@ -41,7 +41,9 @@ signal/convolve2D.py
 signal/crossmul.py
 signal/crossmultiply.py
 signal/filter2D.py
+signal/multilook.py
 product/generic_product.py
+product/geogridparameters.py
 product/radargridparameters.py
 product/sub_swaths.py
 product/swath.py

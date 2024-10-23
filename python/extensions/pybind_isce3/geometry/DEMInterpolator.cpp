@@ -8,6 +8,8 @@
 #include <Eigen/Dense>
 
 #include <isce3/core/Constants.h>
+#include <isce3/core/Ellipsoid.h>
+#include <isce3/core/Projections.h>
 #include <isce3/geometry/loadDem.h>
 #include <isce3/io/Raster.h>
 #include <isce3/product/GeoGridParameters.h>
@@ -58,6 +60,7 @@ void addbinding(pybind11::class_<DEMInterp>& pyDEMInterpolator)
                     py::overload_cast<>(&DEMInterp::refHeight, py::const_),
                     py::overload_cast<double>(&DEMInterp::refHeight))
             .def_property_readonly("have_raster", &DEMInterp::haveRaster)
+            .def_property_readonly("have_stats", &DEMInterp::haveStats)
             .def_property("interp_method",
                     py::overload_cast<>(&DEMInterp::interpMethod, py::const_),
                     py::overload_cast<isce3::core::dataInterpMethod>(
@@ -104,7 +107,13 @@ void addbinding(pybind11::class_<DEMInterp>& pyDEMInterpolator)
             .def_property_readonly("length",
                     py::overload_cast<>(&DEMInterp::length, py::const_))
             .def_property_readonly("epsg_code",
-                    py::overload_cast<>(&DEMInterp::epsgCode, py::const_));
+                    py::overload_cast<>(&DEMInterp::epsgCode, py::const_))
+            .def_property_readonly("mid_lon_lat", &DEMInterp::midLonLat)
+            .def_property_readonly("ellipsoid", [](DEMInterp& self) {
+                isce3::core::Ellipsoid ellipsoid =
+                    makeProjection(self.epsgCode())->ellipsoid();
+                return ellipsoid;
+            });
 }
 
 void addbinding_DEM_raster2interpolator(py::module& m)

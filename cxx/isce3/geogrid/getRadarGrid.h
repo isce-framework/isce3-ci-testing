@@ -13,7 +13,7 @@ namespace isce3 { namespace geogrid {
  * Each output layer is saved onto the first band of its
  * associated raster file.
  * 
- * The line-of-sight (LOS) and along-track unit vectors are
+ * The target-to-sensor line-of-sight (LOS) and along-track unit vectors are
  * referenced to ENU coordinates computed wrt targets.
  *
  * @param[in]  lookside                    Look side

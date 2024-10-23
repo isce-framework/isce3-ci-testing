@@ -2,13 +2,14 @@
 
 import h5py
 import numpy as np
+import numpy.testing as npt
 import isce3.ext.isce3 as isce
 from iscetest import data as test_data_dir
 from pathlib import Path
 import json
 
 from ...focus.backproject import load_h5
-from isce3.signal.point_target_info import analyze_point_target, tofloatvals
+from isce3.cal.point_target_info import analyze_point_target, tofloatvals
 
 c = isce.core.speed_of_light
 
@@ -57,21 +58,30 @@ def test_backproject():
 
     # init output buffer
     out = np.empty((nchip, nchip), np.complex64)
+    # and debug height layer
+    height = np.empty(out.shape, np.float32)
 
     # collect input & output radar_grid, orbit, and Doppler
     in_geometry = isce.container.RadarGeometry(radar_grid, orbit, doppler)
     out_geometry = isce.container.RadarGeometry(out_grid, orbit, doppler)
 
     # focus to output grid
-    isce.cuda.focus.backproject(out, out_geometry, signal_data, in_geometry,
-            dem, center_frequency, azimuth_res, kernel, dry_tropo_model)
+    err = isce.cuda.focus.backproject(out, out_geometry, signal_data,
+            in_geometry, dem, center_frequency, azimuth_res, kernel,
+            dry_tropo_model, height=height)
+
+    assert not err
+
+    # We used a constant DEM height, so make sure the debug height layer
+    # contains that value everywhere.
+    npt.assert_allclose(height, dem.ref_height)
 
     # remove range carrier
     kr = 4. * np.pi / out_grid.wavelength
     r = np.array(out_geometry.slant_range)
     out *= np.exp(-1j * kr * r)
 
-    info = analyze_point_target(out, nchip//2, nchip//2, nov=upsample_factor,
+    info, _ = analyze_point_target(out, nchip//2, nchip//2, nov=upsample_factor,
             chipsize=nchip//2)
     tofloatvals(info)
 

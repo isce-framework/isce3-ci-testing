@@ -1,7 +1,4 @@
-# -*- coding: utf-8 -*-
-
-# Import ISCE extension
-
-# Import wrappers
+from . import granule_id
+from . import descriptions
 from . import readers
-# end of file
+from . import insar

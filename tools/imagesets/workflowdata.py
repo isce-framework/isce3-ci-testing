@@ -4,6 +4,7 @@ workflowdata = {
         "L0B_RRSD_REE1":
         # files to grab
         [
+            "REE_CR_INFO_out17_NISAR.csv",
             "REE_L0B_out17.h5",
             "README.txt",
             "attitude.xml",
@@ -13,12 +14,26 @@ workflowdata = {
         # and so forth
         "L0B_RRSD_REE2":
         [
-            "attitude.xml",
-            "orbit.xml",
-            "NISAR_LCAL_20220101T120000_01.yaml",
-            "NISAR_LINS_20220101T120000_01.h5",
-            "REE_L0B_ECHO_array144sq_03.h5",
-            "REE_ANTPAT_CUTS_DATA.h5",
+            "dem_REE2_right.tif",
+            "NISAR_ANC_L_PR_FOE_20240528T172233_20230701T000140_20230701T000240.xml",
+            "NISAR_ANC_L_PR_FRP_20230929T121335_20230701T000150_20230701T000230.xml",
+            "NISAR_ANTPAT_20230218T144138.h5",
+            "NISAR_LSAR_EXT_CAL_20220101T120000_03.yaml",
+            "NISAR_LSAR_INT_CAL_20220101T120000_01.h5",
+            "README.txt",
+            "NISAR_L0_PR_RRSD_035_079_A_192S_20230701T000150_20230701T000229_A00301_F_J_001.h5",
+        ],
+
+        "L0B_RRSD_REE3":
+        [
+            "dem_90_09_945_16.tiff",
+            "NISAR_ANC_CORNER_REFLECTORS_005.csv",
+            "NISAR_ANC_L_PR_FOE_20240528T193920_20251011T121859_20251011T122049.xml",
+            "NISAR_ANC_L_PR_FRP_20231207T182337_20251011T121909_20251011T122039.xml",
+            "NISAR_ANTPAT_20230707T142741.h5",
+            "NISAR_L0_PR_RRSD_104_159_D_238S_20251011T121909_20251011T122039_A00301_F_J_001.h5",
+            "NISAR_LSAR_EXT_CAL_20220101T120000_03.yaml",
+            "NISAR_LSAR_INT_CAL_20220101T120000_01.h5",
             "README.txt",
         ],
 
@@ -61,19 +76,23 @@ workflowdata = {
         ],
         "L0B_RRSD_ALPSRP110160680_Rosamond":
         [
+            "2008-02-18_0620_Rosamond-corner-reflectors_NISAR.csv",
             "ALPSRP110160680.L0B.h5",
             "dem.tif",
-            "ERA5_N34_N36_W119_W117_20080218_06.grb",
-            "NISAR_ANCL_TEC_20230124T021043_20080218T062000_20080218T062020_v0.0.json",
+            "HRES_2008_02_18_T06_20_00.nc",
+            "NISAR_ANC_L_TEC_20230421T214743_20080218T061910_20080218T061940_v0.1.json",
             "README.txt",
+            "watermask_rosamond.tif",
         ],
         "L0B_RRSD_ALPSRP116870680_Rosamond":
         [
+            "2008-04-04_0619_Rosamond-corner-reflectors_NISAR.csv",
             "ALPSRP116870680.L0B.h5",
             "dem.tif",
-            "ERA5_N34_N36_W119_W117_20080404_06.grb",
-            "NISAR_ANCL_TEC_20230124T021043_20080404T061910_20080404T061940_v0.0.json",
+            "HRES_2008_04_04_T06_19_17.nc",
+            "NISAR_ANC_L_TEC_20230124T021043_20080404T061910_20080404T061940_v0.2.json",
             "README.txt",
+            "watermask_rosamond.tif",
         ],
         "L0B_RRSD_ALPSRP264757150_Amazon":
         [
@@ -100,7 +119,6 @@ workflowdata = {
             "README.txt",
             "REE_ANTPAT_CUTS_BEAM4.h5",
             "REE_ATTITUDE_CHANNEL4_EXTSCENE_PASS1.xml",
-            "REE_L0B_CHANNEL4_EXTSCENE_PASS1_LINE3000.h5",
             "REE_L0B_CHANNEL4_EXTSCENE_PASS1_LINE3000_CALIB.h5",
             "REE_L0B_CHANNEL4_EXTSCENE_PASS1_LINE3000_UNCALIB.h5",
             "REE_ORBIT_CHANNEL4_EXTSCENE_PASS1.xml",
@@ -149,7 +167,7 @@ workflowdata = {
         [
             "SanAnd_05518_12018_000_120419_L090_CX_143_03.h5",
             "dem.tif",
-            "ERA5_N38_N40_W124_W121_20120419_16.grb",
+            "HRES_2012_04_19_T16_37_23.nc",
             "README.txt",
         ],
 
@@ -164,7 +182,7 @@ workflowdata = {
         [
             "SanAnd_05518_12128_008_121105_L090_CX_143_02.h5",
             "dem.tif",
-            "ERA5_N38_N40_W124_W121_20121105_22.grb",
+            "HRES_2012_11_05_T22_48_18.nc",
             "README.txt",
         ],
 
@@ -198,28 +216,21 @@ workflowdata = {
             "README.txt",
         ],
 
-        "L2_GCOV_023_045_A_017_4020_HH_20220926T135152_20220926T135219_P01101_P_P_J_001":
+        "L2_GCOV_004_001_D_001_4000_QPNA_A_20190829T180759_20190829T180809_P01101_M_P_J_001":
         [
-            "WldCvr_cbmap221204.txt",
-            "ni_cube_30_50_220828v2.h5",
-            "vwc_M01_288_200m.h5",
-            "vwc_M01_276_200m.h5",
-            "vwc_M01_264_200m.h5",
-            "eps2mvMironov_002.float32",
-            "alphatable.nc",
-            "A4S10040600100700001.nc",
-            "sm_static_ancillary.h5",
-            "NISAR_L2_PR_GCOV_023_045_A_017_4020_HH_20220926T135152_20220926T135219_P01101_P_P_J_001.h5",
-            "NISAR_L2_PR_GCOV_022_045_A_017_4020_HH_20220914T135152_20220914T135219_P01101_P_P_J_001.h5",
-            "NISAR_L2_PR_GCOV_021_045_A_017_4020_HH_20220902T135152_20220902T135219_P01101_P_P_J_001.h5",
-            "SMAPC/SMAPC_Alpha0_Uncertainty_HH.bin",
-            "SMAPC/SMAPC_Alpha0_Uncertainty_VV.bin",
-            "SMAPC/SMAP_L3_E_17000_nf_average_09_1.dat",
-            "SMAPC/SMAP_L3_E_17000_nf_average_year.dat",
-            "SMAPC/SMAP_L3_E_17000_nf_max_09_1.dat",
-            "SMAPC/SMAP_L3_E_17000_nf_max_year.dat",
-            "SMAPC/SMAP_L3_E_17000_nf_min_09_1.dat",
-            "SMAPC/SMAP_L3_E_17000_nf_min_year.dat",
+            "ERA5_Land_20190829.nc",
+            "NISAR_L2_PR_GCOV_002_001_D_001_4000_QPNA_A_20190801T180758_20190801T180808_P01101_M_P_J_001.h5",
+            "NISAR_L2_PR_GCOV_003_001_D_001_4000_QPNA_A_20190815T180759_20190815T180809_P01101_M_P_J_001.h5",
+            "NISAR_L2_PR_GCOV_004_001_D_001_4000_QPNA_A_20190829T180759_20190829T180809_P01101_M_P_J_001.h5",
+            "NISAR_LOCAL_INCIDENCE_ANGLE_001_001_001.h5",
+            "NISAR_PMI_STATIC_ANCILLARY_DATA_001.h5",
+            "NISAR_SM_STATIC_ANCILLARY_002.h5",
+            "NISAR_TSR_STATIC_ANCILLARY_DATA_001.h5",
+            "NISAR_VWC_M01_213_200m_002.h5",
+            "NISAR_VWC_M01_227_200m_002.h5",
+            "NISAR_VWC_M01_241_200m_002.h5",
+            "palsar2_dem_0.tiff",
+            "palsar2_dem.vrt",
             "README.txt",
         ],
     }
@@ -230,6 +241,7 @@ workflowtests = {
     'rslc': {"rslc_" + name: "L0B_RRSD_" + name for name in [
         "REE1",
         "REE2",
+        "REE3",
         "REE_NISAR_dithered",
         "DIST1",
         "DIST2",
@@ -312,6 +324,6 @@ workflowtests = {
     ]},
 
     'soilm': {"soilm_" + name: "L2_GCOV_" + name for name in [
-        "023_045_A_017_4020_HH_20220926T135152_20220926T135219_P01101_P_P_J_001",
+        "004_001_D_001_4000_QPNA_A_20190829T180759_20190829T180809_P01101_M_P_J_001",
     ]},
 }

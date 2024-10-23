@@ -9,9 +9,9 @@ import time
 
 import journal
 import isce3
+from isce3.core import crop_external_orbit
 from nisar.products.readers import SLC
 from nisar.products.readers.orbit import load_orbit_from_xml
-from nisar.workflows import runconfig
 from nisar.workflows.geo2rdr_runconfig import Geo2rdrRunConfig
 from nisar.workflows.yaml_argparse import YamlArgparse
 
@@ -24,7 +24,7 @@ def run(cfg):
     # Pull parameters from cfg dict
     sec_hdf5 = cfg['input_file_group']['secondary_rslc_file']
     dem_file = cfg['dynamic_ancillary_file_group']['dem_file']
-    sec_orbit = cfg['dynamic_ancillary_file_group']['orbit']['secondary_orbit_file']
+    sec_orbit = cfg['dynamic_ancillary_file_group']['orbit_files']['secondary_orbit_file']
     scratch_path = pathlib.Path(cfg['product_path_group']['scratch_path'])
     freq_pols = cfg['processing']['input_subset']['list_of_frequencies']
     threshold = cfg['processing']['geo2rdr']['threshold']
@@ -33,10 +33,15 @@ def run(cfg):
 
     # Get parameters from SLC
     slc = SLC(hdf5file=sec_hdf5)
+
+    # Get orbit
+    orbit = slc.getOrbit()
     if sec_orbit is not None:
-        orbit = load_orbit_from_xml(sec_orbit)
-    else:
-        orbit = slc.getOrbit()
+        # SLC will get first radar grid whose frequency is available.
+        # Reference epoch and orbit have no frequency dependency.
+        external_orbit = load_orbit_from_xml(sec_orbit, slc.getRadarGrid().ref_epoch)
+        orbit = crop_external_orbit(external_orbit, orbit)
+
 
     # Set ellipsoid based on DEM epsg
     dem_raster = isce3.io.Raster(dem_file)

@@ -1,19 +1,19 @@
 import argparse
 import os
 
-from osgeo import gdal
 import h5py
-import numpy as np
-
 import isce3
-from nisar.workflows import geocode_insar, h5_prep
-from nisar.workflows.geocode_insar_runconfig import GeocodeInsarRunConfig
-
 import iscetest
+import numpy as np
+from nisar.workflows import geocode_insar, prepare_insar_hdf5
+from nisar.products.insar.product_paths import RUNWGroupsPaths, GUNWGroupsPaths
+from nisar.workflows.geocode_insar_runconfig import GeocodeInsarRunConfig
+from osgeo import gdal
+
 
 def test_geocode_run():
     '''
-    Test if phase geocodeping runs smoothly
+    Test if phase geocoding runs smoothly
     '''
     test_yaml_path = os.path.join(iscetest.data, 'insar_test.yaml')
     for pu in ['cpu', 'gpu']:
@@ -42,12 +42,13 @@ def test_geocode_run():
         geo_tx.tofile('gunw_geogrid.txt', sep=',')
 
         # prepare HDF5 outputs
-        out_paths = h5_prep.run(runconfig.cfg)
+        out_paths = prepare_insar_hdf5.run(runconfig.cfg)
 
         # insert rdr2geo outputs into RUNW HDF5
         rdr2geo_dict = {'x': 'unwrappedPhase', 'y': 'coherenceMagnitude'}
 
-        runw_product_path = 'science/LSAR/RUNW/swaths/frequencyA/interferogram/HH'
+        # Create RUNW obj to avoid hard-coded path to RUNW datasets
+        runw_product_path = f'{RUNWGroupsPaths().SwathsPath}/frequencyA/interferogram/HH'
         az_looks = runconfig.cfg['processing']['crossmul']['azimuth_looks']
         rg_looks = runconfig.cfg['processing']['crossmul']['range_looks']
         with h5py.File(out_paths['RUNW'], 'a', libver='latest', swmr=True) as h_runw:
@@ -84,8 +85,9 @@ def test_geocode_validate():
         if pu == 'gpu' and not hasattr(isce3, 'cuda'):
             continue
 
+        # Create GUNW obj to avoid hard-coded paths to GUNW datasets
         path_gunw = os.path.join(scratch_path, f'{pu}_gunw.h5')
-        product_path = 'science/LSAR/GUNW/grids/frequencyA/interferogram/HH'
+        product_path = f'{GUNWGroupsPaths().GridsPath}/frequencyA/unwrappedInterferogram/HH'
         with h5py.File(path_gunw, 'r', libver='latest', swmr=True) as h:
             # iterate over axis
             rdr2geo_dict = {'x': 'unwrappedPhase', 'y': 'coherenceMagnitude'}

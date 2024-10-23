@@ -32,7 +32,8 @@ focus/dry-troposphere-model.cpp
 focus/gaps.cpp
 focus/presum.cpp
 focus/rangecomp.cpp
-geocode/geocode.cpp
+geocode/geocodeCov.cpp
+geocode/geocodeSlc.cpp
 geometry/dem/dem.cpp
 geometry/geo2rdr/geo2rdr.cpp
 geometry/geometry/geometry_constlat.cpp
@@ -79,7 +80,6 @@ signal/signal.cpp
 signal/signal_utils.cpp
 unwrap/icu/icu.cpp
 unwrap/phass/phass.cpp
-unwrap/snaphu/mcf.cpp
 )
 
 #This is a temporary fix - since GDAL does not support

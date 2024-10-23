@@ -15,13 +15,21 @@ from . import geometry
 from . import geogrid
 from . import image
 from . import io
-from . import ionosphere
+from . import matchtemplate
 from . import math
+from . import noise
 from . import polsar
 from . import product
 from . import signal
+from . import solid_earth_tides
 from . import splitspectrum
 from . import unwrap
+
+from . import atmosphere
+# Need to import `cal` after the other submodules that it depends on have been added as
+# attributes to `isce3` above. (If you try to import it in alphabetical order you will
+# get an AttributeError.)
+from . import cal
 
 # check for cuda
 if hasattr(extisce3, "cuda"):

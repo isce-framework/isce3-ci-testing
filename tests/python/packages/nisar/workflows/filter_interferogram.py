@@ -2,14 +2,14 @@ import argparse
 import os
 
 import h5py
-from isce3.signal.filter_data import filter_data
 import iscetest
 import numpy as np
-from osgeo import gdal
-
-from nisar.workflows import filter_interferogram, h5_prep
+from isce3.signal.filter_data import filter_data
+from nisar.workflows import filter_interferogram, prepare_insar_hdf5
 from nisar.workflows.filter_interferogram_runconfig import \
     FilterInterferogramRunConfig
+from nisar.products.insar.product_paths import RIFGGroupsPaths
+from osgeo import gdal
 from scipy.signal import convolve2d
 
 
@@ -34,10 +34,10 @@ def test_filter_interferogram_run():
     runconfig = FilterInterferogramRunConfig(args)
     runconfig.geocode_common_arg_load()
 
-    out_paths = h5_prep.run(runconfig.cfg)
+    out_paths = prepare_insar_hdf5.run(runconfig.cfg)
 
     # Modify the interferogram data to have something meaningful
-    product_path = '/science/LSAR/RIFG/swaths/frequencyA/interferogram/HH'
+    product_path = f'{RIFGGroupsPaths().SwathsPath}/frequencyA/interferogram/HH'
     with h5py.File(out_paths['RIFG'], "a", libver='latest',
                    swmr=True) as h_rifg:
         ds = h_rifg[os.path.join(product_path, 'wrappedInterferogram')]
@@ -59,7 +59,8 @@ def test_filter_interferogram_validate():
     '''
 
     scratch_path = '.'
-    product_path = '/science/LSAR/RIFG/swaths/frequencyA/interferogram/HH'
+    # Create RIFG obj to avoid hard-code paths to RIFG datasets
+    product_path = f'{RIFGGroupsPaths().SwathsPath}/frequencyA/interferogram/HH'
 
     with h5py.File(os.path.join(scratch_path, 'RIFG.h5')) as h_rifg:
         # Check that the filtered interferogram still have 0 phase

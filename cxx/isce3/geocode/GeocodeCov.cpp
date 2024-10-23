@@ -10,6 +10,8 @@
 #include <isce3/core/DenseMatrix.h>
 #include <isce3/core/Projections.h>
 #include <isce3/core/TypeTraits.h>
+#include <isce3/core/Constants.h>
+#include <isce3/core/Utilities.h>
 #include <isce3/geometry/DEMInterpolator.h>
 #include <isce3/geometry/loadDem.h>
 #include <isce3/geometry/RTC.h>
@@ -26,16 +28,6 @@ using isce3::core::Vec3;
 using isce3::core::GeocodeMemoryMode;
 
 namespace isce3 { namespace geocode {
-
-inline float _getRadarGridOffset(
-        isce3::core::Matrix<float>& offset_array, float y, float x)
-{
-    const long y_index = std::min(std::max(static_cast<long>(y), 0L),
-            static_cast<long>(offset_array.length()));
-    const long x_index = std::min(std::max(static_cast<long>(x), 0L),
-            static_cast<long>(offset_array.width()));
-    return offset_array(y_index, x_index);
-}
 
 template<class T>
 void Geocode<T>::updateGeoGrid(
@@ -100,6 +92,36 @@ void Geocode<T>::geoGrid(double geoGridStartX, double geoGridStartY,
     _epsgOut = epsgcode;
 }
 
+
+static void _validateInputLayoverShadowMaskRaster(
+        isce3::io::Raster* input_layover_shadow_mask_raster,
+        const isce3::product::RadarGridParameters& radar_grid){
+
+    pyre::journal::error_t error("isce3.geocode.GeocodeCov");
+
+    if (input_layover_shadow_mask_raster->width() != radar_grid.width()) {
+        std::string err_str {
+            "ERROR the widths of the input layover/shadow mask (" +
+            std::to_string(input_layover_shadow_mask_raster->width()) +
+            ") and radar geometry (" +
+            std::to_string(radar_grid.width()) +
+            ") do not match"};
+        error << err_str << pyre::journal::endl;
+        throw isce3::except::InvalidArgument(ISCE_SRCINFO(), err_str);
+    }
+
+    if (input_layover_shadow_mask_raster->length() != radar_grid.length()) {
+        std::string err_str {
+            "ERROR the lengths of the input layover/shadow mask (" +
+            std::to_string(input_layover_shadow_mask_raster->length()) +
+            ") and radar geometry (" +
+            std::to_string(radar_grid.length()) +
+            ") do not match"};
+        error << err_str << pyre::journal::endl;
+        throw isce3::except::InvalidArgument(ISCE_SRCINFO(), err_str);
+    }
+}
+
 template<class T>
 void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
         isce3::io::Raster& input_raster, isce3::io::Raster& output_raster,
@@ -109,16 +131,22 @@ void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
         isce3::geometry::rtcInputTerrainRadiometry input_terrain_radiometry,
         isce3::geometry::rtcOutputTerrainRadiometry output_terrain_radiometry,
         int exponent, float rtc_min_value_db, double rtc_geogrid_upsampling,
-        isce3::geometry::rtcAlgorithm rtc_algorithm, double abs_cal_factor,
-        float clip_min, float clip_max, float min_nlooks,
-        float radar_grid_nlooks, isce3::io::Raster* out_off_diag_terms,
+        isce3::geometry::rtcAlgorithm rtc_algorithm,
+        isce3::geometry::rtcAreaBetaMode rtc_area_beta_mode,
+        double abs_cal_factor, float clip_min, float clip_max,
+        float min_nlooks, float radar_grid_nlooks,
+        isce3::io::Raster* out_off_diag_terms,
         isce3::io::Raster* out_geo_rdr, isce3::io::Raster* out_geo_dem,
         isce3::io::Raster* out_geo_nlooks, isce3::io::Raster* out_geo_rtc,
+        isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0,
         isce3::io::Raster* phase_screen_raster,
-        isce3::io::Raster* offset_az_raster,
-        isce3::io::Raster* offset_rg_raster, isce3::io::Raster* input_rtc,
-        isce3::io::Raster* output_rtc, isce3::product::SubSwaths* sub_swaths,
-        isce3::io::Raster* out_valid_samples_sub_swath_mask,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction,
+        isce3::io::Raster* input_rtc, isce3::io::Raster* output_rtc,
+        isce3::io::Raster* input_layover_shadow_mask_raster,
+        isce3::product::SubSwaths* sub_swaths,
+        std::optional<bool> apply_valid_samples_sub_swath_masking,
+        isce3::io::Raster* out_mask,
         GeocodeMemoryMode geocode_memory_mode,
         const long long min_block_size, const long long max_block_size,
         isce3::core::dataInterpMethod dem_interp_method)
@@ -132,10 +160,13 @@ void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
                 flag_apply_rtc, flag_az_baseband_doppler, flatten,
                 input_terrain_radiometry, output_terrain_radiometry,
                 rtc_min_value_db, rtc_geogrid_upsampling, rtc_algorithm,
+                rtc_area_beta_mode,
                 abs_cal_factor, clip_min, clip_max, out_geo_rdr, out_geo_dem,
-                out_geo_rtc, phase_screen_raster, offset_az_raster,
-                offset_rg_raster, input_rtc, output_rtc, sub_swaths,
-                out_valid_samples_sub_swath_mask,
+                out_geo_rtc, out_geo_rtc_gamma0_to_sigma0,
+                phase_screen_raster, az_time_correction,
+                slant_range_correction, input_rtc, output_rtc,
+                input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask,
                 geocode_memory_mode, min_block_size, max_block_size,
                 dem_interp_method);
     else if (flag_run_geocode_interp &&
@@ -145,10 +176,13 @@ void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
                 dem_raster, flag_apply_rtc, flag_az_baseband_doppler, flatten,
                 input_terrain_radiometry, output_terrain_radiometry,
                 rtc_min_value_db, rtc_geogrid_upsampling, rtc_algorithm,
+                rtc_area_beta_mode,
                 abs_cal_factor, clip_min, clip_max, out_geo_rdr, out_geo_dem,
-                out_geo_rtc, phase_screen_raster, offset_az_raster,
-                offset_rg_raster, input_rtc, output_rtc, sub_swaths,
-                out_valid_samples_sub_swath_mask, 
+                out_geo_rtc, out_geo_rtc_gamma0_to_sigma0, phase_screen_raster,
+                az_time_correction,
+                slant_range_correction, input_rtc, output_rtc,
+                input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask, 
                 geocode_memory_mode, min_block_size, max_block_size,
                 dem_interp_method);
     else if (flag_run_geocode_interp)
@@ -156,10 +190,13 @@ void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
                 dem_raster, flag_apply_rtc, flag_az_baseband_doppler, flatten,
                 input_terrain_radiometry, output_terrain_radiometry,
                 rtc_min_value_db, rtc_geogrid_upsampling, rtc_algorithm,
+                rtc_area_beta_mode,
                 abs_cal_factor, clip_min, clip_max, out_geo_rdr, out_geo_dem,
-                out_geo_rtc, phase_screen_raster, offset_az_raster,
-                offset_rg_raster, input_rtc, output_rtc, sub_swaths,
-                out_valid_samples_sub_swath_mask,
+                out_geo_rtc,  out_geo_rtc_gamma0_to_sigma0,
+                phase_screen_raster, az_time_correction,
+                slant_range_correction, input_rtc, output_rtc,
+                input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask,
                 geocode_memory_mode, min_block_size, max_block_size,
                 dem_interp_method);
     else if (!flag_complex_to_real)
@@ -167,10 +204,14 @@ void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
                 geogrid_upsampling, flag_upsample_radar_grid, flag_apply_rtc,
                 input_terrain_radiometry, output_terrain_radiometry,
                 rtc_min_value_db, rtc_geogrid_upsampling, rtc_algorithm,
+                rtc_area_beta_mode,
                 abs_cal_factor, clip_min, clip_max, min_nlooks,
                 radar_grid_nlooks, out_off_diag_terms, out_geo_rdr, out_geo_dem,
-                out_geo_nlooks, out_geo_rtc, input_rtc, output_rtc, sub_swaths,
-                out_valid_samples_sub_swath_mask,
+                out_geo_nlooks, out_geo_rtc,  out_geo_rtc_gamma0_to_sigma0,
+                az_time_correction, slant_range_correction,
+                input_rtc, output_rtc,
+                input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask,
                 geocode_memory_mode, min_block_size, max_block_size,
                 dem_interp_method);
     else if (std::is_same<T, double>::value ||
@@ -179,23 +220,31 @@ void Geocode<T>::geocode(const isce3::product::RadarGridParameters& radar_grid,
                 dem_raster, geogrid_upsampling, flag_upsample_radar_grid,
                 flag_apply_rtc, input_terrain_radiometry,
                 output_terrain_radiometry, rtc_min_value_db,
-                rtc_geogrid_upsampling, rtc_algorithm, abs_cal_factor, clip_min,
+                rtc_geogrid_upsampling, rtc_algorithm, rtc_area_beta_mode,
+                abs_cal_factor, clip_min,
                 clip_max, min_nlooks, radar_grid_nlooks, out_off_diag_terms,
                 out_geo_rdr, out_geo_dem, out_geo_nlooks, out_geo_rtc,
-                input_rtc, output_rtc, sub_swaths,
-                out_valid_samples_sub_swath_mask, geocode_memory_mode,
-                min_block_size, max_block_size, dem_interp_method);
+                out_geo_rtc_gamma0_to_sigma0, az_time_correction,
+                slant_range_correction, input_rtc,
+                output_rtc, input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask,
+                geocode_memory_mode, min_block_size, max_block_size,
+                dem_interp_method);
     else
         geocodeAreaProj<float>(radar_grid, input_raster, output_raster,
                 dem_raster, geogrid_upsampling, flag_upsample_radar_grid,
                 flag_apply_rtc, input_terrain_radiometry,
                 output_terrain_radiometry, rtc_min_value_db,
-                rtc_geogrid_upsampling, rtc_algorithm, abs_cal_factor, clip_min,
+                rtc_geogrid_upsampling, rtc_algorithm, rtc_area_beta_mode,
+                abs_cal_factor, clip_min,
                 clip_max, min_nlooks, radar_grid_nlooks, out_off_diag_terms,
                 out_geo_rdr, out_geo_dem, out_geo_nlooks, out_geo_rtc,
-                input_rtc, output_rtc, sub_swaths,
-                out_valid_samples_sub_swath_mask, geocode_memory_mode,
-                min_block_size, max_block_size, dem_interp_method);
+                out_geo_rtc_gamma0_to_sigma0, az_time_correction,
+                slant_range_correction, input_rtc,
+                output_rtc, input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask,
+                geocode_memory_mode, min_block_size, max_block_size,
+                dem_interp_method);
 }
 
 template<class T>
@@ -208,14 +257,21 @@ void Geocode<T>::geocodeInterp(
         isce3::geometry::rtcInputTerrainRadiometry input_terrain_radiometry,
         isce3::geometry::rtcOutputTerrainRadiometry output_terrain_radiometry,
         float rtc_min_value_db, double rtc_geogrid_upsampling,
-        isce3::geometry::rtcAlgorithm rtc_algorithm, double abs_cal_factor,
+        isce3::geometry::rtcAlgorithm rtc_algorithm,
+        isce3::geometry::rtcAreaBetaMode rtc_area_beta_mode,
+        double abs_cal_factor,
         float clip_min, float clip_max, isce3::io::Raster* out_geo_rdr,
         isce3::io::Raster* out_geo_dem, isce3::io::Raster* out_geo_rtc,
+        isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0,
         isce3::io::Raster* phase_screen_raster,
-        isce3::io::Raster* offset_az_raster,
-        isce3::io::Raster* offset_rg_raster, isce3::io::Raster* input_rtc,
-        isce3::io::Raster* output_rtc, isce3::product::SubSwaths* sub_swaths,
-        isce3::io::Raster* out_valid_samples_sub_swath_mask,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction,
+        isce3::io::Raster* input_rtc,
+        isce3::io::Raster* output_rtc,
+        isce3::io::Raster* input_layover_shadow_mask_raster,
+        isce3::product::SubSwaths* sub_swaths,
+        std::optional<bool> apply_valid_samples_sub_swath_masking,
+        isce3::io::Raster* out_mask,
         isce3::core::GeocodeMemoryMode geocode_memory_mode, const long long min_block_size,
         const long long max_block_size,
         isce3::core::dataInterpMethod dem_interp_method)
@@ -228,6 +284,31 @@ void Geocode<T>::geocodeInterp(
             _geoGridSpacingX, _geoGridSpacingY, _geoGridWidth, _geoGridLength,
             _epsgOut);
 
+    /*
+    If `apply_valid_samples_sub_swath_masking` is `true` and the
+    `sub_swath` object was not provided, raise an error
+    */
+    if (apply_valid_samples_sub_swath_masking &&
+            *apply_valid_samples_sub_swath_masking && sub_swaths == nullptr) {
+        std::string error_message =
+            ("ERROR cannot apply valid-samples sub-swath"
+             "masking without a sub_swaths object");
+        throw isce3::except::InvalidArgument(ISCE_SRCINFO(), error_message);
+    }
+
+    /*
+    `apply_valid_samples_sub_swath_masking` is an optional argument whereas
+    `effective_apply_valid_samples_sub_swath_masking` is the "effective"
+    boolean value.
+    If `apply_valid_samples_sub_swath_masking` has a "valid" value, assign
+    it to `effective_apply_valid_samples_sub_swath_masking`, otherwise
+    only enable sub-swath masking if the object sub_swaths was provided by
+    the user (i.e., if `sub_swaths != nullptr`)
+    */
+    bool effective_apply_valid_samples_sub_swath_masking =
+        apply_valid_samples_sub_swath_masking?
+        *apply_valid_samples_sub_swath_masking: sub_swaths != nullptr;
+
     info << "geo2rdr threshold: " << _threshold << pyre::journal::newline;
     info << "geo2rdr numiter: " << _numiter << pyre::journal::newline;
     info << "baseband azimuth spectrum (0:false, 1:true): "
@@ -239,10 +320,10 @@ void Geocode<T>::geocodeInterp(
             << std::to_string(phase_screen_raster != nullptr)
             << pyre::journal::newline;
     info << "apply azimuth offset (0: false, 1: true): "
-            << std::to_string(offset_az_raster != nullptr)
+            << std::to_string(az_time_correction.haveData())
             << pyre::journal::newline;
     info << "apply range offset (0: false, 1: true): "
-            << std::to_string(offset_rg_raster != nullptr)
+            << std::to_string(slant_range_correction.haveData())
             << pyre::journal::newline;
 
     // number of bands in the input raster
@@ -269,6 +350,20 @@ void Geocode<T>::geocodeInterp(
         }
     }
 
+    isce3::core::Matrix<uint8_t> input_layover_shadow_mask;
+    if (input_layover_shadow_mask_raster != nullptr) {
+        info << "input layover/shadow mask provided: True" <<
+            pyre::journal::newline;
+        _validateInputLayoverShadowMaskRaster(
+            input_layover_shadow_mask_raster, radar_grid);
+
+        input_layover_shadow_mask.resize(
+                radar_grid.length(), radar_grid.width());
+        input_layover_shadow_mask_raster->getBlock(
+            input_layover_shadow_mask.data(), 0, 0,
+            radar_grid.width(), radar_grid.length(), 1);
+    }
+
     // create data interpolator
     std::unique_ptr<isce3::core::Interpolator<T_out>> interp {
             isce3::core::createInterpolator<T_out>(_data_interp_method)};
@@ -281,22 +376,6 @@ void Geocode<T>::geocodeInterp(
                 radar_grid.width(), radar_grid.length(), 1);
     }
 
-    // read azimuth offset
-    isce3::core::Matrix<float> offset_az_array;
-    if (offset_az_raster != nullptr) {
-        offset_az_array.resize(radar_grid.length(), radar_grid.width());
-        offset_az_raster->getBlock(offset_az_array.data(), 0, 0,
-                radar_grid.width(), radar_grid.length(), 1);
-    }
-
-    // read range offset
-    isce3::core::Matrix<float> offset_rg_array;
-    if (offset_rg_raster != nullptr) {
-        offset_rg_array.resize(radar_grid.length(), radar_grid.width());
-        offset_rg_raster->getBlock(offset_rg_array.data(), 0, 0,
-                radar_grid.width(), radar_grid.length(), 1);
-    }
-
     if (!std::isnan(clip_min))
         info << "clip min: " << clip_min << pyre::journal::newline;
 
@@ -304,8 +383,6 @@ void Geocode<T>::geocodeInterp(
         info << "clip max: " << clip_max << pyre::journal::newline;
 
     // RTC
-    bool is_radar_grid_single_block = true;
-
     double rtc_min_value = 0;
     if (!std::isnan(rtc_min_value_db) && flag_apply_rtc) {
         rtc_min_value = std::pow(10, (rtc_min_value_db / 10));
@@ -318,8 +395,10 @@ void Geocode<T>::geocodeInterp(
              << pyre::journal::newline;
 
     isce3::io::Raster* rtc_raster;
+    isce3::io::Raster* rtc_sigma0_raster = nullptr;
     std::unique_ptr<isce3::io::Raster> rtc_raster_unique_ptr;
-    isce3::core::Matrix<float> rtc_area;
+    std::unique_ptr<isce3::io::Raster> rtc_raster_sigma0_unique_ptr;
+    isce3::core::Matrix<float> rtc_area_array, rtc_area_sigma0_array;
 
     info << "flag_apply_rtc (0:false, 1:true): " << flag_apply_rtc
          << pyre::journal::newline;
@@ -337,8 +416,10 @@ void Geocode<T>::geocodeInterp(
             // if RTC (area factor) raster does not needed to be saved,
             // initialize it as a GDAL memory virtual file
             if (output_rtc == nullptr) {
+                std::string vsimem_ref = (
+                    "/vsimem/" + getTempString("geocode_cov_interp_rtc"));
                 rtc_raster_unique_ptr = std::make_unique<isce3::io::Raster>(
-                        "/vsimem/dummy", radar_grid.width(),
+                        vsimem_ref, radar_grid.width(),
                         radar_grid.length(), 1, GDT_Float32, "ENVI");
                 rtc_raster = rtc_raster_unique_ptr.get();
             }
@@ -361,26 +442,46 @@ void Geocode<T>::geocodeInterp(
             else
                 rtc_memory_mode = isce3::core::MemoryModeBlocksY::MultipleBlocksY;
 
-            int radar_grid_nlooks = 1;
+            if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                std::string vsimem_ref = (
+                    "/vsimem/" + getTempString("geocode_cov_areaproj_rtc_sigma0"));
+                rtc_raster_sigma0_unique_ptr = 
+                    std::make_unique<isce3::io::Raster>(
+                        vsimem_ref, radar_grid.width(),
+                        radar_grid.length(), 1, GDT_Float32, "ENVI");
+                rtc_sigma0_raster = 
+                    rtc_raster_sigma0_unique_ptr.get();
+            }
+
+            isce3::io::Raster* out_geo_rdr = nullptr;
+            isce3::io::Raster* out_geo_grid = nullptr;
 
             computeRtc(demRaster, *rtc_raster, radar_grid, _orbit, _doppler,
                     _geoGridStartY, _geoGridSpacingY, _geoGridStartX,
                     _geoGridSpacingX, _geoGridLength, _geoGridWidth, _epsgOut,
                     input_terrain_radiometry, output_terrain_radiometry,
-                    rtc_area_mode, rtc_algorithm, rtc_geogrid_upsampling,
-                    rtc_min_value_db, radar_grid_nlooks, nullptr, nullptr,
-                    nullptr, rtc_memory_mode, dem_interp_method, _threshold,
-                    _numiter, 1.0e-8);
+                    rtc_area_mode, rtc_algorithm, rtc_area_beta_mode,
+                    rtc_geogrid_upsampling, rtc_min_value_db,
+                    out_geo_rdr, out_geo_grid,
+                    rtc_sigma0_raster, rtc_memory_mode,
+                    dem_interp_method, _threshold,
+                    _numiter, 1.0e-8, min_block_size, max_block_size);
 
         } else {
             info << "reading pre-computed RTC..." << pyre::journal::newline;
             rtc_raster = input_rtc;
         }
 
-        if (is_radar_grid_single_block) {
-            rtc_area.resize(radar_grid.length(), radar_grid.width());
-            rtc_raster->getBlock(rtc_area.data(), 0, 0, radar_grid.width(),
-                    radar_grid.length(), 1);
+        rtc_area_array.resize(radar_grid.length(), radar_grid.width());
+        rtc_raster->getBlock(rtc_area_array.data(), 0, 0, radar_grid.width(),
+                radar_grid.length(), 1);
+
+        if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+            rtc_area_sigma0_array.resize(radar_grid.length(),
+                                         radar_grid.width());
+            rtc_sigma0_raster->getBlock(rtc_area_sigma0_array.data(),
+                                        0, 0, radar_grid.width(),
+                                        radar_grid.length(), 1);
         }
     }
 
@@ -498,6 +599,24 @@ void Geocode<T>::geocodeInterp(
             if (!converged)
                 continue;
 
+            // apply timing corrections
+            if (az_time_correction.contains(aztime, srange)) {
+                const auto aztimeCor = az_time_correction.eval(aztime,
+                                                                srange);
+                aztime += aztimeCor;
+            }
+
+            if (slant_range_correction.contains(aztime, srange)) {
+                const auto srangeCor = slant_range_correction.eval(aztime,
+                                                                    srange);
+                srange += srangeCor;
+            }
+
+            // check if az time and slant within radar grid
+            if (!radar_grid.contains(aztime, srange)
+                    || !_nativeDoppler.contains(aztime, srange))
+                continue;
+
             // get the row and column index in the radar grid
             double rdrY = ((aztime - radar_grid.sensingStart()) /
                            radar_grid.azimuthTimeInterval());
@@ -511,18 +630,6 @@ void Geocode<T>::geocodeInterp(
                 out_geo_rdr_a(blockLine, pixel) = rdrY;
 #pragma omp atomic write
                 out_geo_rdr_r(blockLine, pixel) = rdrX;
-            }
-
-            if (offset_az_raster != nullptr || offset_rg_raster != nullptr) {
-                float az_offset = 0;
-                if (offset_az_raster != nullptr) {
-                    az_offset =
-                            _getRadarGridOffset(offset_az_array, rdrY, rdrX);
-                }
-                if (offset_rg_raster != nullptr) {
-                    rdrX += _getRadarGridOffset(offset_rg_array, rdrY, rdrX);
-                }
-                rdrY += az_offset;
             }
 
             if (rdrY < 0 || rdrX < 0 || rdrY >= radar_grid.length() ||
@@ -579,7 +686,7 @@ void Geocode<T>::geocodeInterp(
         T_out nan_t_out = 0;
         nan_t_out *= std::numeric_limits<T_out_real>::quiet_NaN();
 
-        // define the geo-block matrix based on the rasterbands data type
+        // define the geo-block matrix based on the raster bands data type
         isce3::core::Matrix<T_out> geoDataBlock(
                 geoBlockLength, geogrid.width());
         geoDataBlock.fill(nan_t_out);
@@ -659,21 +766,27 @@ void Geocode<T>::geocodeInterp(
             }
 
             // (optional arg) if band == 0, populate RTC array
-            isce3::io::Raster* out_geo_rtc_band;
+            isce3::io::Raster* out_geo_rtc_band = nullptr;
             isce3::core::Matrix<float> out_geo_rtc_array;
             if (out_geo_rtc != nullptr && band == 0) {
                 out_geo_rtc_band = out_geo_rtc;
                 out_geo_rtc_array.resize(geoBlockLength, geogrid.width());
                 out_geo_rtc_array.fill(std::numeric_limits<float>::quiet_NaN());
-            } else {
-                out_geo_rtc_band = nullptr;
             }
 
-            isce3::core::Matrix<short> out_valid_samples_sub_swath_mask_array;
-            if (out_valid_samples_sub_swath_mask != nullptr) {
-                out_valid_samples_sub_swath_mask_array.resize(
-                    geoBlockLength, geogrid.width());
-                out_valid_samples_sub_swath_mask_array.fill(0);
+            // (optional arg) if band == 0, populate RTC array
+            isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0_band = nullptr;
+            isce3::core::Matrix<float> out_geo_rtc_gamma0_to_sigma0_array;
+            if (out_geo_rtc_gamma0_to_sigma0 != nullptr && band == 0) {
+                out_geo_rtc_gamma0_to_sigma0_band = out_geo_rtc_gamma0_to_sigma0;
+                out_geo_rtc_gamma0_to_sigma0_array.resize(geoBlockLength, geogrid.width());
+                out_geo_rtc_gamma0_to_sigma0_array.fill(std::numeric_limits<float>::quiet_NaN());
+            }
+
+            isce3::core::Matrix<uint8_t> out_mask_array;
+            if (out_mask != nullptr) {
+                out_mask_array.resize(geoBlockLength, geogrid.width());
+                out_mask_array.fill(255);
             }
  
             _interpolate(rdrDataBlock, geoDataBlock, radarX, radarY,
@@ -681,19 +794,26 @@ void Geocode<T>::geocodeInterp(
                     rangeFirstPixel, interp.get(), radar_grid,
                     flag_az_baseband_doppler, flatten, phase_screen_raster,
                     phase_screen_array, abs_cal_factor, clip_min, clip_max,
-                    flag_apply_rtc, rtc_area, out_geo_rtc_band,
-                    out_geo_rtc_array, sub_swaths,
-                    out_valid_samples_sub_swath_mask,
-                    out_valid_samples_sub_swath_mask_array);
+                    flag_apply_rtc, rtc_area_array, rtc_area_sigma0_array, out_geo_rtc_band,
+                    out_geo_rtc_array, out_geo_rtc_gamma0_to_sigma0_band,
+                    out_geo_rtc_gamma0_to_sigma0_array,
+                    input_layover_shadow_mask_raster,
+                    input_layover_shadow_mask, sub_swaths,
+                    effective_apply_valid_samples_sub_swath_masking,
+                    out_mask, out_mask_array);
 
             // flush optional layers
-            if (out_geo_rtc_band != nullptr) {
+            if (out_geo_rtc_band != nullptr && band == 0) {
                 out_geo_rtc->setBlock(out_geo_rtc_array.data(), 0, lineStart,
                         geogrid.width(), geoBlockLength, 1);
             }
-            if (out_valid_samples_sub_swath_mask != nullptr) {
-                out_valid_samples_sub_swath_mask->setBlock(
-                    out_valid_samples_sub_swath_mask_array.data(), 0,
+            if (out_geo_rtc_gamma0_to_sigma0_band != nullptr && band == 0) {
+                out_geo_rtc_gamma0_to_sigma0->setBlock(
+                    out_geo_rtc_gamma0_to_sigma0_array.data(), 0, lineStart,
+                    geogrid.width(), geoBlockLength, 1);
+            }
+            if (out_mask != nullptr && band == nbands - 1) {
+                out_mask->setBlock(out_mask_array.data(), 0,
                     lineStart, geogrid.width(), geoBlockLength, 1);
             }
 
@@ -729,9 +849,14 @@ void Geocode<T>::geocodeInterp(
         out_geo_rtc->setEPSG(geogrid.epsg());
     }
 
-    if (out_valid_samples_sub_swath_mask != nullptr) {
-        out_valid_samples_sub_swath_mask->setGeoTransform(geotransform);
-        out_valid_samples_sub_swath_mask->setEPSG(geogrid.epsg());
+    if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+        out_geo_rtc_gamma0_to_sigma0->setGeoTransform(geotransform);
+        out_geo_rtc_gamma0_to_sigma0->setEPSG(geogrid.epsg());
+    }
+
+    if (out_mask != nullptr) {
+        out_mask->setGeoTransform(geotransform);
+        out_mask->setEPSG(geogrid.epsg());
     }
 
     auto elapsed_time_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -756,11 +881,17 @@ inline void Geocode<T>::_interpolate(
         isce3::core::Matrix<float>& phase_screen_array, double abs_cal_factor,
         float clip_min, float clip_max, bool flag_apply_rtc,
         const isce3::core::Matrix<float>& rtc_area,
+        const isce3::core::Matrix<float>& rtc_area_sigma,
         isce3::io::Raster* out_geo_rtc,
         isce3::core::Matrix<float>& out_geo_rtc_array,
+        isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0,
+        isce3::core::Matrix<float>& out_geo_rtc_gamma0_to_sigma0_array,
+        isce3::io::Raster* input_layover_shadow_mask_raster,
+        isce3::core::Matrix<uint8_t>& input_layover_shadow_mask_array,
         isce3::product::SubSwaths * sub_swaths,
-        isce3::io::Raster* out_valid_samples_sub_swath_mask,
-        isce3::core::Matrix<short>& out_valid_samples_sub_swath_mask_array)
+        bool apply_valid_samples_sub_swath_masking,
+        isce3::io::Raster* out_mask,
+        isce3::core::Matrix<uint8_t>& out_mask_array)
 {
 
     using isce3::math::complex_operations::operator*;
@@ -789,49 +920,90 @@ inline void Geocode<T>::_interpolate(
         if (rdrX < interp_margin || rdrY < interp_margin ||
                 rdrX >= (radarBlockWidth - interp_margin) ||
                 rdrY >= (radarBlockLength - interp_margin)) {
-
-            // set NaN values according to T_out, i.e. real (NaN) or complex
-            // (NaN, NaN)
-            using T_out_real = typename isce3::real<T_out>::type;
-            geoDataBlock(i, j) *= std::numeric_limits<T_out_real>::quiet_NaN();
-            if (flag_apply_rtc && out_geo_rtc != nullptr) {
-                out_geo_rtc_array(i, j) = std::numeric_limits<float>::quiet_NaN();
-            }
-            if (out_valid_samples_sub_swath_mask != nullptr) {
-                out_valid_samples_sub_swath_mask_array(i, j) = 0;
-            }
             continue;
         }
 
-        short sample_sub_swath_center = 1;
+        int rdr_y_rslc = std::floor(rdrY + azimuthFirstLine);
+        int rdr_x_rslc = std::floor(rdrX + rangeFirstPixel);
+
+        /*
+        If we need to output the mask layer AND the current geogrid pixel
+        (valid or invalid) is inside the radar grid, initialize the
+        output mask with `0` (originally it has fill value `255`)
+        */
+        if (out_mask != nullptr) {
+            out_mask_array(i, j) = 0;
+        }
+
         if (sub_swaths != nullptr) {
+
+            // read the sub-swath value at the center to save the output mask
+            uint8_t sample_sub_swath_center = sub_swaths->getSampleSubSwath(
+                rdr_y_rslc, rdr_x_rslc);
+
+            if (out_mask != nullptr) {
+                out_mask_array(i, j) = sample_sub_swath_center;
+            }
+
+           if (apply_valid_samples_sub_swath_masking) {
+
+                bool flag_has_invalid_sample = sample_sub_swath_center == 0;
+
+                // loop through interpolation window and check if there's at least
+                // one sample that is invalid/partially focused
+                for (int yy = -interp_margin; yy <= interp_margin; ++yy) {
+                    for (int xx = -interp_margin; xx <= interp_margin; ++xx) {
+                        if (flag_has_invalid_sample) {
+                            break;
+                        }
+                        uint8_t sample_sub_swath = sub_swaths->getSampleSubSwath(
+                            rdr_y_rslc + yy, rdr_x_rslc + xx);
+                        flag_has_invalid_sample |= sample_sub_swath == 0;
+                    }
+                    if (flag_has_invalid_sample) {
+                        break;
+                    }
+                }
+
+                if (flag_has_invalid_sample) {
+                    // set NaN values according to T_out, i.e. real (NaN)
+                    // or complex (NaN, NaN)
+                    using T_out_real = typename isce3::real<T_out>::type;
+                    geoDataBlock(i, j) *= 
+                        std::numeric_limits<T_out_real>::quiet_NaN();
+                    if (flag_apply_rtc && out_geo_rtc != nullptr) {
+                        out_geo_rtc_array(i, j) =
+                            std::numeric_limits<float>::quiet_NaN();
+                    }
+                    if (flag_apply_rtc &&
+                            out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                        out_geo_rtc_gamma0_to_sigma0_array(i, j) =
+                            std::numeric_limits<float>::quiet_NaN();
+                    }
+                    continue;
+                }
+           }
+        }
+
+        /* 
+        check within the interpolation kernel (approximated by `interp_margin`)
+        if any of the samples is marked as shadow or layover-and-shadow
+        in which case we skip to the next position, i.e., we "break" the 
+        2 inner for-loop bellow (vars: yy and xx) and "continue" from the parent
+        for-loop (var: kk) above.
+        */
+        if (input_layover_shadow_mask_raster != nullptr) {
             bool flag_skip = false;
-            int rdr_y_rslc = std::floor(rdrY + azimuthFirstLine);
-            int rdr_x_rslc = std::floor(rdrX + rangeFirstPixel);
             for (int yy = -interp_margin; yy <= interp_margin; ++yy) {
                 for (int xx = -interp_margin; xx <= interp_margin; ++xx) {
-                    short sample_sub_swath = sub_swaths->getSampleSubSwath(
-                        rdr_y_rslc + yy, rdr_x_rslc + xx);
-                    if (sample_sub_swath == 0) {
-                        // set NaN values according to T_out, i.e. real (NaN)
-                        // or complex (NaN, NaN)
-                        using T_out_real = typename isce3::real<T_out>::type;
-                        geoDataBlock(i, j) *= 
-                            std::numeric_limits<T_out_real>::quiet_NaN();
-                        if (flag_apply_rtc && out_geo_rtc != nullptr) {
-                            out_geo_rtc_array(i, j) =
-                                std::numeric_limits<float>::quiet_NaN();
-                        }
-                        if (out_valid_samples_sub_swath_mask != nullptr) {
-                            out_valid_samples_sub_swath_mask_array(i, j) = 0;
-                        }
+                    const uint8_t input_layover_shadow_value = \
+                            input_layover_shadow_mask_array(rdr_y_rslc + yy,
+                                                      rdr_x_rslc + xx);
+                    if (input_layover_shadow_value == SHADOW_VALUE ||
+                            input_layover_shadow_value == LAYOVER_AND_SHADOW_VALUE) {
                         flag_skip = true;
                         break;
                     }
-                    if (yy == 0 && xx == 0) {
-                        sample_sub_swath_center = sample_sub_swath_center;
-                    }
- 
                 }
                 if (flag_skip) {
                     break;
@@ -840,9 +1012,6 @@ inline void Geocode<T>::_interpolate(
             if (flag_skip) {
                 continue;
             }
-        }
-        if (out_valid_samples_sub_swath_mask != nullptr) {
-            out_valid_samples_sub_swath_mask_array(i, j) = sample_sub_swath_center;
         }
 
         // Interpolate chip
@@ -853,10 +1022,24 @@ inline void Geocode<T>::_interpolate(
 
         if (flag_apply_rtc) {
             float rtc_value =
-                    rtc_area(int(rdrY + azimuthFirstLine), int(rdrX + rangeFirstPixel));
+                    rtc_area(int(rdrY + azimuthFirstLine),
+                             int(rdrX + rangeFirstPixel));
             val /= std::sqrt(rtc_value);
             if (out_geo_rtc != nullptr) {
                 out_geo_rtc_array(i, j) = rtc_value;
+            }
+
+            if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                /*
+                The RTC area normalization factor (ANF) gamma0 to sigma0
+                is computed from the RTC ANF gamma0 to beta0 (or
+                sigma0-ellipsoid) `rtc_value` divided by the RTC ANF sigma0
+                to beta0 `rtc_sigma0`
+                */
+                float rtc_sigma0 = rtc_area_sigma(int(rdrY + azimuthFirstLine),
+                                                int(rdrX + rangeFirstPixel));
+                const double rtc_gamma0_to_sigma0 = rtc_value / rtc_sigma0;
+                out_geo_rtc_gamma0_to_sigma0_array(i, j) = rtc_gamma0_to_sigma0;
             }
         }
 
@@ -1199,8 +1382,11 @@ void _getUpsampledBlock(
 
 static int _geo2rdrWrapper(const Vec3& inputLLH, const Ellipsoid& ellipsoid,
         const Orbit& orbit, const LUT2d<double>& doppler, double& aztime,
-        double& slantRange, double wavelength, LookSide side, double threshold,
-        int maxIter, double deltaRange, bool flag_edge = true)
+        double& slantRange, double wavelength, LookSide side,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction,
+        double threshold, int maxIter, double deltaRange,
+        bool flag_edge = true)
 {
     int flag_converged;
     for (int i = 0; i <= static_cast<int>(flag_edge); ++i) {
@@ -1219,7 +1405,71 @@ static int _geo2rdrWrapper(const Vec3& inputLLH, const Ellipsoid& ellipsoid,
             return flag_converged;
         }
     }
+    // apply timing corrections
+    if (az_time_correction.contains(aztime, slantRange)) {
+        const auto aztimeCor = az_time_correction.eval(aztime, slantRange);
+        aztime += aztimeCor;
+    }
+
+    if (slant_range_correction.contains(aztime, slantRange)) {
+        const auto srangeCor = slant_range_correction.eval(aztime, slantRange);
+        slantRange += srangeCor;
+    }
+
     return flag_converged;
+}
+
+
+/**
+* This function fills up a GCOV raster block with NaNs if the block is
+# invalid (e.g., outside of the DEM coverage).
+*
+* @param[in]  block_x            Number of the current block in the X-direction
+* @param[in]  block_size_x       Processing block size in the X direction
+* @param[in]  block_y            Number of the current block in the Y-direction
+* @param[in]  block_size_y       Processing block size in the Y direction
+* @param[in]  this_block_size_x  Size of the current block in the X direction
+* @param[in]  this_block_size_y  Size of the current block in the Y direction
+* @param[out] output_raster      Output raster
+*
+*/
+template<class T>
+inline void _fillGcovBlocksWithNans(
+    int block_x, int block_size_x, int block_y,
+    int block_size_y, int this_block_size_x, int this_block_size_y,
+    isce3::io::Raster* output_raster)
+{
+
+    // The output raster may be optional (e.g., off-diagonal raster). If
+    // it is `nullptr`, return.
+    if (output_raster == nullptr) {
+        return;
+    }
+
+    // declare matrix that will hold the NaNs
+    isce3::core::Matrix<T> data_block(this_block_size_y, this_block_size_x);
+
+    // declare variable to hold NaN values according to the templateT,
+    // i.e. real (NaN) or complex (NaN, NaN)
+    using T_real = typename isce3::real<T>::type;
+    T nan_t = 0;
+    nan_t *= std::numeric_limits<T_real>::quiet_NaN();
+
+    // fill matrix with NaN
+    data_block.fill(nan_t);
+
+    const int nbands = output_raster->numBands();
+    for (int band = 0; band < nbands; ++band) {
+        _Pragma("omp critical")
+        {
+            // set block with the matrix `data_block` that
+            // is filled with NaNs
+            output_raster->setBlock(
+                data_block.data(), block_x * block_size_x,
+                block_y * block_size_y, this_block_size_x,
+                this_block_size_y, band + 1);
+        }
+    }
 }
 
 inline void _saveOptionalFiles(int block_x, int block_size_x, int block_y,
@@ -1235,8 +1485,10 @@ inline void _saveOptionalFiles(int block_x, int block_size_x, int block_y,
         isce3::core::Matrix<float>& out_geo_nlooks_array,
         isce3::io::Raster* out_geo_rtc,
         isce3::core::Matrix<float>& out_geo_rtc_array,
-        isce3::io::Raster* out_valid_samples_sub_swath_mask,
-        isce3::core::Matrix<short>& out_valid_samples_sub_swath_mask_array)
+        isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0,
+        isce3::core::Matrix<float>& out_geo_rtc_gamma0_to_sigma0_array,
+        isce3::io::Raster* out_mask,
+        isce3::core::Matrix<uint8_t>& out_mask_array)
 {
 
     if (out_geo_rdr != nullptr)
@@ -1279,11 +1531,21 @@ inline void _saveOptionalFiles(int block_x, int block_size_x, int block_y,
                 block_y * block_size_y, this_block_size_x, this_block_size_y,
                 1);
     }
-    if (out_valid_samples_sub_swath_mask != nullptr)
+
+    if (out_geo_rtc_gamma0_to_sigma0 != nullptr)
 #pragma omp critical
     {
-        out_valid_samples_sub_swath_mask->setBlock(
-            out_valid_samples_sub_swath_mask_array.data(),
+        out_geo_rtc_gamma0_to_sigma0->setBlock(
+            out_geo_rtc_gamma0_to_sigma0_array.data(), block_x * block_size_x,
+            block_y * block_size_y, this_block_size_x, this_block_size_y,
+            1);
+    }
+
+    if (out_mask != nullptr)
+#pragma omp critical
+    {
+        out_mask->setBlock(
+            out_mask_array.data(),
                 block_x * block_size_x, block_y * block_size_y,
                 this_block_size_x, this_block_size_y, 1);
     }
@@ -1388,8 +1650,9 @@ void Geocode<T>::_getRadarPositionBorder(double geogrid_upsampling,
         const std::function<Vec3(double, double,
                 const isce3::geometry::DEMInterpolator&,
                 isce3::core::ProjectionBase*)>& getDemCoords,
-        isce3::geometry::DEMInterpolator& dem_interp)
-{
+        isce3::geometry::DEMInterpolator& dem_interp,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction) {
     /*
     Get radar grid boundaries, i.e. min and max rg. and az. indexes, using
     the border of a geogrid bounding box.
@@ -1407,12 +1670,12 @@ void Geocode<T>::_getRadarPositionBorder(double geogrid_upsampling,
     _getRadarPositionVect(y0, 0, jmax, geogrid_upsampling, &az_time,
             &range_distance, a_min, r_min, a_max, r_max, radar_grid, proj,
             dem_interp, getDemCoords, flag_direction_line, flag_save_vectors,
-            flag_compute_min_max);
+            flag_compute_min_max, az_time_correction, slant_range_correction);
 
     _getRadarPositionVect(yf, 0, jmax, geogrid_upsampling, &az_time,
             &range_distance, a_min, r_min, a_max, r_max, radar_grid, proj,
             dem_interp, getDemCoords, flag_direction_line, flag_save_vectors,
-            flag_compute_min_max);
+            flag_compute_min_max, az_time_correction, slant_range_correction);
 
     // pre-compute radar positions on the left side of the geogrid
     flag_direction_line = false;
@@ -1423,12 +1686,12 @@ void Geocode<T>::_getRadarPositionBorder(double geogrid_upsampling,
     _getRadarPositionVect(x0, i_start, i_end, geogrid_upsampling, &az_time,
             &range_distance, a_min, r_min, a_max, r_max, radar_grid, proj,
             dem_interp, getDemCoords, flag_direction_line, flag_save_vectors,
-            flag_compute_min_max);
+            flag_compute_min_max, az_time_correction, slant_range_correction);
 
     _getRadarPositionVect(xf, i_start, i_end, geogrid_upsampling, &az_time,
             &range_distance, a_min, r_min, a_max, r_max, radar_grid, proj,
             dem_interp, getDemCoords, flag_direction_line, flag_save_vectors,
-            flag_compute_min_max);
+            flag_compute_min_max, az_time_correction, slant_range_correction);
 }
 
 template<class T>
@@ -1533,20 +1796,28 @@ void Geocode<T>::geocodeAreaProj(
         isce3::geometry::rtcInputTerrainRadiometry input_terrain_radiometry,
         isce3::geometry::rtcOutputTerrainRadiometry output_terrain_radiometry,
         float rtc_min_value_db, double rtc_geogrid_upsampling,
-        isce3::geometry::rtcAlgorithm rtc_algorithm, double abs_cal_factor,
+        isce3::geometry::rtcAlgorithm rtc_algorithm,
+        isce3::geometry::rtcAreaBetaMode rtc_area_beta_mode,
+        double abs_cal_factor,
         float clip_min, float clip_max, float min_nlooks,
         float radar_grid_nlooks, isce3::io::Raster* out_off_diag_terms,
         isce3::io::Raster* out_geo_rdr, isce3::io::Raster* out_geo_dem,
         isce3::io::Raster* out_geo_nlooks, isce3::io::Raster* out_geo_rtc,
+        isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction,
         isce3::io::Raster* input_rtc, isce3::io::Raster* output_rtc,
+        isce3::io::Raster* input_layover_shadow_mask_raster,
         isce3::product::SubSwaths* sub_swaths,
-        isce3::io::Raster* out_valid_samples_sub_swath_mask,
+        std::optional<bool> apply_valid_samples_sub_swath_masking,
+        isce3::io::Raster* out_mask,
         GeocodeMemoryMode geocode_memory_mode, const long long min_block_size,
         const long long max_block_size,
         isce3::core::dataInterpMethod dem_interp_method)
 {
 
     pyre::journal::info_t info("isce.geocode.GeocodeCov.geocodeAreaProj");
+    pyre::journal::error_t error("isce.geocode.GeocodeCov.geocodeAreaProj");
 
     if (std::isnan(geogrid_upsampling))
         geogrid_upsampling = 1;
@@ -1568,14 +1839,44 @@ void Geocode<T>::geocodeAreaProj(
                 flag_upsample_radar_grid, flag_apply_rtc,
                 input_terrain_radiometry, output_terrain_radiometry,
                 rtc_min_value_db, rtc_geogrid_upsampling, rtc_algorithm,
+                rtc_area_beta_mode,
                 abs_cal_factor, clip_min, clip_max, min_nlooks,
                 upsampled_radar_grid_nlooks, out_off_diag_terms, out_geo_rdr,
-                out_geo_dem, out_geo_nlooks, out_geo_rtc, input_rtc,
-                output_rtc, sub_swaths, out_valid_samples_sub_swath_mask,
-                geocode_memory_mode, min_block_size,
-                max_block_size, dem_interp_method);
+                out_geo_dem, out_geo_nlooks, out_geo_rtc,
+                out_geo_rtc_gamma0_to_sigma0,
+                az_time_correction, slant_range_correction, input_rtc,
+                output_rtc, input_layover_shadow_mask_raster, sub_swaths,
+                apply_valid_samples_sub_swath_masking, out_mask,
+                geocode_memory_mode, min_block_size, max_block_size,
+                dem_interp_method);
         return;
     }
+
+    /*
+    If `apply_valid_samples_sub_swath_masking` is `true` and the
+    `sub_swath` object was not provided, raise an error
+    */
+    if (apply_valid_samples_sub_swath_masking &&
+            *apply_valid_samples_sub_swath_masking && sub_swaths == nullptr) {
+        std::string error_message =
+            ("ERROR cannot apply valid-samples sub-swath"
+             "masking without a sub_swaths object");
+        throw isce3::except::InvalidArgument(ISCE_SRCINFO(), error_message);
+    }
+
+    /*
+    `apply_valid_samples_sub_swath_masking` is an optional argument 
+    (std::optional) whereas
+    `effective_apply_valid_samples_sub_swath_masking` is the "effective"
+    boolean value.
+    If `apply_valid_samples_sub_swath_masking` has a "valid" value, assign
+    it to `effective_apply_valid_samples_sub_swath_masking`, otherwise
+    only enable sub-swath masking if the object sub_swaths was provided by
+    the user (i.e., if `sub_swaths != nullptr`)
+    */
+    bool effective_apply_valid_samples_sub_swath_masking =
+        apply_valid_samples_sub_swath_masking?
+        *apply_valid_samples_sub_swath_masking: sub_swaths != nullptr;
 
     auto start_time = std::chrono::high_resolution_clock::now();
 
@@ -1636,8 +1937,11 @@ void Geocode<T>::geocodeAreaProj(
 
     // RTC
     isce3::io::Raster* rtc_raster = nullptr;
+    isce3::io::Raster* rtc_sigma0_raster = nullptr;
     std::unique_ptr<isce3::io::Raster> rtc_raster_unique_ptr;
-    isce3::core::Matrix<float> rtc_area;
+    std::unique_ptr<isce3::io::Raster> rtc_raster_sigma0_unique_ptr;
+
+    isce3::core::Matrix<float> rtc_area, rtc_area_sigma;
     if (flag_apply_rtc) {
         std::string input_terrain_radiometry_str =
                 get_input_terrain_radiometry_str(input_terrain_radiometry);
@@ -1656,8 +1960,10 @@ void Geocode<T>::geocodeAreaProj(
             // if RTC (area factor) raster does not needed to be saved,
             // initialize it as a GDAL memory virtual file
             if (output_rtc == nullptr) {
+                std::string vsimem_ref = (
+                    "/vsimem/" + getTempString("geocode_cov_areaproj_rtc"));
                 rtc_raster_unique_ptr = std::make_unique<isce3::io::Raster>(
-                        "/vsimem/dummy", radar_grid_cropped.width(),
+                        vsimem_ref, radar_grid_cropped.width(),
                         radar_grid_cropped.length(), 1, GDT_Float32, "ENVI");
                 rtc_raster = rtc_raster_unique_ptr.get();
             }
@@ -1682,13 +1988,29 @@ void Geocode<T>::geocodeAreaProj(
             else
                 rtc_memory_mode = isce3::core::MemoryModeBlocksY::MultipleBlocksY;
 
+            if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                std::string vsimem_ref = (
+                    "/vsimem/" + getTempString("geocode_cov_areaproj_rtc_sigma0"));
+                rtc_raster_sigma0_unique_ptr = 
+                    std::make_unique<isce3::io::Raster>(
+                        vsimem_ref, radar_grid.width(),
+                        radar_grid.length(), 1, GDT_Float32, "ENVI");
+                rtc_sigma0_raster = 
+                    rtc_raster_sigma0_unique_ptr.get();
+            }
+
+            isce3::io::Raster* out_geo_rdr = nullptr;
+            isce3::io::Raster* out_geo_grid = nullptr;
+
             computeRtc(dem_raster, *rtc_raster, radar_grid_cropped, _orbit,
                     _doppler, _geoGridStartY, _geoGridSpacingY, _geoGridStartX,
                     _geoGridSpacingX, _geoGridLength, _geoGridWidth, _epsgOut,
                     input_terrain_radiometry, output_terrain_radiometry,
-                    rtc_area_mode, rtc_algorithm, rtc_geogrid_upsampling,
-                    rtc_min_value_db, radar_grid_nlooks, nullptr, nullptr,
-                    nullptr, rtc_memory_mode, dem_interp_method, _threshold,
+                    rtc_area_mode, rtc_algorithm, rtc_area_beta_mode,
+                    rtc_geogrid_upsampling, rtc_min_value_db,
+                    out_geo_rdr, out_geo_grid,
+                    rtc_sigma0_raster, rtc_memory_mode,
+                    dem_interp_method, _threshold,
                     _numiter, 1.0e-8, min_block_size, max_block_size);
         } else {
             info << "reading pre-computed RTC..." << pyre::journal::newline;
@@ -1700,7 +2022,42 @@ void Geocode<T>::geocodeAreaProj(
                     radar_grid_cropped.length(), radar_grid_cropped.width());
             rtc_raster->getBlock(rtc_area.data(), 0, 0,
                     radar_grid_cropped.width(), radar_grid_cropped.length(), 1);
+
+            if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                rtc_area_sigma.resize(radar_grid.length(),
+                                                radar_grid.width());
+                rtc_sigma0_raster->getBlock(
+                    rtc_area_sigma.data(), 0, 0, radar_grid.width(),
+                    radar_grid.length(), 1);
+            }
+
+
         }
+    }
+
+    isce3::core::Matrix<uint8_t> input_layover_shadow_mask;
+    if (input_layover_shadow_mask_raster != nullptr) {
+        info << "input layover/shadow mask provided: True" <<
+            pyre::journal::newline;
+
+        _validateInputLayoverShadowMaskRaster(
+            input_layover_shadow_mask_raster, radar_grid);
+
+        /*
+        if we are in radar-grid single block mode, read entire layover/shadow
+        mask now. Otherwise, the mask will be read in blocks within
+        _runBlock()
+        */
+        if (is_radar_grid_single_block) {
+            input_layover_shadow_mask.resize(
+                    radar_grid_cropped.length(), radar_grid_cropped.width());
+            input_layover_shadow_mask_raster->getBlock(
+                input_layover_shadow_mask.data(), offset_x, offset_y,
+                radar_grid_cropped.width(), radar_grid_cropped.length(), 1);
+        }
+    } else {
+        info << "input layover/shadow mask provided: False" <<
+            pyre::journal::newline;
     }
 
     // number of bands in the input raster
@@ -1724,6 +2081,13 @@ void Geocode<T>::geocodeAreaProj(
     info << "reproject DEM (0: false, 1: true): "
          << std::to_string(_epsgOut != dem_raster.getEPSG())
          << pyre::journal::newline;
+
+    info << "apply azimuth offset (0: false, 1: true): "
+            << std::to_string(az_time_correction.haveData())
+            << pyre::journal::newline;
+    info << "apply range offset (0: false, 1: true): "
+            << std::to_string(slant_range_correction.haveData())
+            << pyre::journal::newline;
 
     const long long progress_block = ((long long) imax) * jmax / 100;
 
@@ -1816,12 +2180,19 @@ void Geocode<T>::geocodeAreaProj(
                         progress_block, geogrid_upsampling, nbands,
                         nbands_off_diag_terms, dem_interp_method, dem_raster,
                         out_off_diag_terms, out_geo_rdr, out_geo_dem,
-                        out_geo_nlooks, out_geo_rtc, proj.get(), flag_apply_rtc,
-                        rtc_raster, input_raster, offset_y, offset_x,
-                        output_raster, rtc_area, rtc_min_value, abs_cal_factor,
+                        out_geo_nlooks, out_geo_rtc,
+                        out_geo_rtc_gamma0_to_sigma0,
+                        proj.get(), flag_apply_rtc,
+                        rtc_raster, rtc_sigma0_raster,
+                        az_time_correction, slant_range_correction,
+                        input_raster, offset_y, offset_x,
+                        output_raster, rtc_area, rtc_area_sigma,
+                        rtc_min_value, abs_cal_factor,
                         clip_min, clip_max, min_nlooks, radar_grid_nlooks,
-                        flag_upsample_radar_grid, sub_swaths, 
-                        out_valid_samples_sub_swath_mask, geocode_memory_mode,
+                        flag_upsample_radar_grid, input_layover_shadow_mask_raster,
+                        input_layover_shadow_mask, sub_swaths,
+                        effective_apply_valid_samples_sub_swath_masking,
+                        out_mask, geocode_memory_mode,
                         min_block_size, max_block_size, info);
             }
         }
@@ -1836,12 +2207,18 @@ void Geocode<T>::geocodeAreaProj(
                         progress_block, geogrid_upsampling, nbands,
                         nbands_off_diag_terms, dem_interp_method, dem_raster,
                         out_off_diag_terms, out_geo_rdr, out_geo_dem,
-                        out_geo_nlooks, out_geo_rtc, proj.get(), flag_apply_rtc,
-                        rtc_raster, input_raster, offset_y, offset_x,
-                        output_raster, rtc_area, rtc_min_value, abs_cal_factor,
+                        out_geo_nlooks, out_geo_rtc,
+                        out_geo_rtc_gamma0_to_sigma0,
+                        proj.get(), flag_apply_rtc,
+                        rtc_raster, rtc_sigma0_raster,
+                        az_time_correction, slant_range_correction,
+                        input_raster, offset_y, offset_x,
+                        output_raster, rtc_area, rtc_area_sigma,
+                        rtc_min_value, abs_cal_factor,
                         clip_min, clip_max, min_nlooks, radar_grid_nlooks,
-                        flag_upsample_radar_grid, sub_swaths,
-                        out_valid_samples_sub_swath_mask,
+                        flag_upsample_radar_grid, input_layover_shadow_mask_raster,
+                        input_layover_shadow_mask, sub_swaths,
+                        effective_apply_valid_samples_sub_swath_masking, out_mask,
                         geocode_memory_mode, min_block_size, max_block_size,
                         info);
             }
@@ -1892,13 +2269,18 @@ void Geocode<T>::geocodeAreaProj(
         out_geo_rtc->setEPSG(_epsgOut);
     }
 
+    if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+        out_geo_rtc_gamma0_to_sigma0->setGeoTransform(geotransform);
+        out_geo_rtc_gamma0_to_sigma0->setEPSG(_epsgOut);
+    }
+
     if (out_off_diag_terms != nullptr) {
         out_off_diag_terms->setGeoTransform(geotransform);
         out_off_diag_terms->setEPSG(_epsgOut);
     }
-    if (out_valid_samples_sub_swath_mask != nullptr) {
-        out_valid_samples_sub_swath_mask->setGeoTransform(geotransform);
-        out_valid_samples_sub_swath_mask->setEPSG(_epsgOut);
+    if (out_mask != nullptr) {
+        out_mask->setGeoTransform(geotransform);
+        out_mask->setEPSG(_epsgOut);
     }
 
     auto elapsed_time_milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1918,9 +2300,11 @@ void Geocode<T>::_getRadarPositionVect(double dem_pos_1, const int k_start,
                 const isce3::geometry::DEMInterpolator&,
                 isce3::core::ProjectionBase*)>& getDemCoords,
         bool flag_direction_line, bool flag_save_vectors,
-        bool flag_compute_min_max, std::vector<double>* a_vect,
-        std::vector<double>* r_vect, std::vector<Vec3>* dem_vect)
-{
+        bool flag_compute_min_max,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction,
+        std::vector<double>* a_vect, std::vector<double>* r_vect,
+        std::vector<Vec3>* dem_vect) {
     /*
     Compute radar positions (az, rg, DEM vect.) for a geogrid vector
     (e.g. geogrid border) in X or Y direction (defined by flag_direction_line).
@@ -1964,6 +2348,7 @@ void Geocode<T>::_getRadarPositionVect(double dem_pos_1, const int k_start,
                 _geo2rdrWrapper(dem_interp_block.proj()->inverse(dem_pos_vect),
                         _ellipsoid, _orbit, _doppler, *az_time, *range_distance,
                         radar_grid.wavelength(), radar_grid.lookSide(),
+                        az_time_correction, slant_range_correction,
                         _threshold, _numiter, 1.0e-8, true);
 
         // if it didn't converge, reset initial solution and continue
@@ -2012,14 +2397,24 @@ void Geocode<T>::_runBlock(
         isce3::io::Raster& dem_raster, isce3::io::Raster* out_off_diag_terms,
         isce3::io::Raster* out_geo_rdr, isce3::io::Raster* out_geo_dem,
         isce3::io::Raster* out_geo_nlooks, isce3::io::Raster* out_geo_rtc,
+        isce3::io::Raster* out_geo_rtc_gamma0_to_sigma0, 
         isce3::core::ProjectionBase* proj, bool flag_apply_rtc,
-        isce3::io::Raster* rtc_raster, isce3::io::Raster& input_raster,
+        isce3::io::Raster* rtc_raster,
+        isce3::io::Raster* rtc_sigma0_raster,
+        const isce3::core::LUT2d<double>& az_time_correction,
+        const isce3::core::LUT2d<double>& slant_range_correction,
+        isce3::io::Raster& input_raster,
         int raster_offset_y, int raster_offset_x,
         isce3::io::Raster& output_raster, isce3::core::Matrix<float>& rtc_area,
+        isce3::core::Matrix<float>& rtc_area_sigma,
         float rtc_min_value, double abs_cal_factor, float clip_min,
         float clip_max, float min_nlooks, float radar_grid_nlooks,
-        bool flag_upsample_radar_grid, isce3::product::SubSwaths * sub_swaths,
-        isce3::io::Raster* out_valid_samples_sub_swath_mask,
+        bool flag_upsample_radar_grid,
+        isce3::io::Raster* input_layover_shadow_mask_raster,
+        isce3::core::Matrix<uint8_t>& input_layover_shadow_mask,
+        isce3::product::SubSwaths * sub_swaths,
+        bool apply_valid_samples_sub_swath_masking,
+        isce3::io::Raster* out_mask,
         GeocodeMemoryMode geocode_memory_mode,
         const long long min_block_size, const long long max_block_size,
         pyre::journal::info_t& info)
@@ -2088,11 +2483,18 @@ void Geocode<T>::_runBlock(
         out_geo_rtc_array.fill(std::numeric_limits<float>::quiet_NaN());
     }
 
-    isce3::core::Matrix<short> out_valid_samples_sub_swath_mask_array;
-    if (out_valid_samples_sub_swath_mask != nullptr) {
-        out_valid_samples_sub_swath_mask_array.resize(
-            this_block_size_y, this_block_size_x);
-        out_valid_samples_sub_swath_mask_array.fill(0);
+    isce3::core::Matrix<float> out_geo_rtc_gamma0_to_sigma0_array;
+    if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+        out_geo_rtc_gamma0_to_sigma0_array.resize(this_block_size_y,
+                                                  this_block_size_x);
+        out_geo_rtc_gamma0_to_sigma0_array.fill(
+            std::numeric_limits<float>::quiet_NaN());
+    }
+
+    isce3::core::Matrix<uint8_t> out_mask_array;
+    if (out_mask != nullptr) {
+        out_mask_array.resize(this_block_size_y, this_block_size_x);
+        out_mask_array.fill(255);
     }
 
     int ii_0 = block_y * block_size_with_upsampling_y;
@@ -2133,6 +2535,15 @@ void Geocode<T>::_runBlock(
             &dem_interp_block, proj);
 
     if (error_code != isce3::error::ErrorCode::Success) {
+
+        _fillGcovBlocksWithNans<T_out>(block_x, block_size_x, block_y,
+            block_size_y, this_block_size_x, this_block_size_y,
+            &output_raster);
+
+        _fillGcovBlocksWithNans<T>(block_x, block_size_x, block_y,
+            block_size_y, this_block_size_x, this_block_size_y,
+            out_off_diag_terms);
+
         _saveOptionalFiles(block_x, block_size_x, block_y, block_size_y,
                 this_block_size_x, this_block_size_y,
                 block_size_with_upsampling_x, block_size_with_upsampling_y,
@@ -2140,34 +2551,9 @@ void Geocode<T>::_runBlock(
                 this_block_size_with_upsampling_y, out_geo_rdr, out_geo_rdr_a,
                 out_geo_rdr_r, out_geo_dem, out_geo_dem_array, out_geo_nlooks,
                 out_geo_nlooks_array, out_geo_rtc, out_geo_rtc_array,
-                out_valid_samples_sub_swath_mask,
-                out_valid_samples_sub_swath_mask_array);
+                out_geo_rtc_gamma0_to_sigma0, out_geo_rtc_gamma0_to_sigma0_array,
+                out_mask, out_mask_array);
 
-        isce3::core::Matrix<T_out> geoDataBlock(
-                this_block_size_y, this_block_size_x);
-
-        // fill both matrices with NaN
-        geoDataBlock.fill(nan_t_out);
-
-        for (int band = 0; band < nbands; ++band) {
-#pragma omp critical
-            {
-                output_raster.setBlock(geoDataBlock.data(),
-                        block_x * block_size_x, block_y * block_size_y,
-                        this_block_size_x, this_block_size_y, band + 1);
-            }
-        }
-
-        if (nbands_off_diag_terms > 0) {
-            for (int band = 0; band < nbands_off_diag_terms; ++band) {
-#pragma omp critical
-                {
-                    out_off_diag_terms->setBlock(geoDataBlock.data(),
-                            block_x * block_size_x, block_y * block_size_y,
-                            this_block_size_x, this_block_size_y, band + 1);
-                }
-            }
-        }
         return;
     }
 
@@ -2235,8 +2621,8 @@ void Geocode<T>::_runBlock(
             jj_0 + this_block_size_with_upsampling_x, geogrid_upsampling, &a11,
             &r11, &a_idx_min, &r_idx_min, &a_idx_max, &r_idx_max, radar_grid,
             proj, dem_interp_block, getDemCoords, flag_direction_line,
-            flag_save_vectors, flag_compute_min_max, &a_last, &r_last,
-            &dem_last);
+            flag_save_vectors, flag_compute_min_max, az_time_correction,
+            slant_range_correction, &a_last, &r_last, &dem_last);
 
     // pre-compute radar positions on the bottom of the geogrid
     dem_y1 = (_geoGridStartY +
@@ -2255,8 +2641,8 @@ void Geocode<T>::_runBlock(
             jj_0 + this_block_size_with_upsampling_x, geogrid_upsampling, &a11,
             &r11, &a_idx_min, &r_idx_min, &a_idx_max, &r_idx_max, radar_grid,
             proj, dem_interp_block, getDemCoords, flag_direction_line,
-            flag_save_vectors, flag_compute_min_max, &a_bottom, &r_bottom,
-            &dem_bottom);
+            flag_save_vectors, flag_compute_min_max, az_time_correction,
+            slant_range_correction, &a_bottom, &r_bottom, &dem_bottom);
 
     // pre-compute radar positions on the left side of the geogrid
     flag_direction_line = false;
@@ -2278,8 +2664,8 @@ void Geocode<T>::_runBlock(
     _getRadarPositionVect(dem_x1, i_start, i_end, geogrid_upsampling, &a11,
             &r11, &a_idx_min, &r_idx_min, &a_idx_max, &r_idx_max, radar_grid,
             proj, dem_interp_block, getDemCoords, flag_direction_line,
-            flag_save_vectors, flag_compute_min_max, &a_left, &r_left,
-            &dem_left);
+            flag_save_vectors, flag_compute_min_max, az_time_correction,
+            slant_range_correction, &a_left, &r_left, &dem_left);
 
     // pre-compute radar positions on the right side of the geogrid
     std::vector<double> a_right(this_block_size_with_upsampling_y - 1,
@@ -2298,15 +2684,16 @@ void Geocode<T>::_runBlock(
     _getRadarPositionVect(dem_x1, i_start, i_end, geogrid_upsampling, &a11,
             &r11, &a_idx_min, &r_idx_min, &a_idx_max, &r_idx_max, radar_grid,
             proj, dem_interp_block, getDemCoords, flag_direction_line,
-            flag_save_vectors, flag_compute_min_max, &a_right, &r_right,
-            &dem_right);
+            flag_save_vectors, flag_compute_min_max, az_time_correction,
+            slant_range_correction, &a_right, &r_right, &dem_right);
 
     // load radar grid data
     int offset_x = 0, offset_y = 0;
     int xbound = radar_grid.width() - 1;
     int ybound = radar_grid.length() - 1;
 
-    isce3::core::Matrix<float> rtc_area_block;
+    isce3::core::Matrix<float> rtc_area_block, rtc_area_sigma_block;
+    isce3::core::Matrix<uint8_t> input_layover_shadow_mask_block;
     std::vector<std::unique_ptr<isce3::core::Matrix<T2>>> rdrDataBlock;
     if (!is_radar_grid_single_block) {
 
@@ -2340,6 +2727,15 @@ void Geocode<T>::_runBlock(
         int grid_size_x = xbound - offset_x + 1;
 
         if (grid_size_y <= 0 || grid_size_x <= 0) {
+
+            _fillGcovBlocksWithNans<T_out>(block_x, block_size_x, block_y,
+                block_size_y, this_block_size_x, this_block_size_y,
+                &output_raster);
+
+            _fillGcovBlocksWithNans<T>(block_x, block_size_x, block_y,
+                block_size_y, this_block_size_x, this_block_size_y,
+                out_off_diag_terms);
+
             _saveOptionalFiles(block_x, block_size_x, block_y, block_size_y,
                     this_block_size_x, this_block_size_y,
                     block_size_with_upsampling_x, block_size_with_upsampling_y,
@@ -2348,34 +2744,8 @@ void Geocode<T>::_runBlock(
                     out_geo_rdr_a, out_geo_rdr_r, out_geo_dem,
                     out_geo_dem_array, out_geo_nlooks, out_geo_nlooks_array,
                     out_geo_rtc, out_geo_rtc_array,
-                    out_valid_samples_sub_swath_mask,
-                    out_valid_samples_sub_swath_mask_array);
-
-            isce3::core::Matrix<T_out> geoDataBlock(
-                    this_block_size_y, this_block_size_x);
-
-            // fill both matrices with NaN
-            geoDataBlock.fill(nan_t_out);
-
-            for (int band = 0; band < nbands; ++band) {
-                _Pragma("omp critical")
-                {
-                    output_raster.setBlock(geoDataBlock.data(),
-                            block_x * block_size_x, block_y * block_size_y,
-                            this_block_size_x, this_block_size_y, band + 1);
-                }
-            }
-
-            if (nbands_off_diag_terms > 0) {
-                for (int band = 0; band < nbands_off_diag_terms; ++band) {
-                    _Pragma("omp critical")
-                    {
-                        out_off_diag_terms->setBlock(geoDataBlock.data(),
-                                block_x * block_size_x, block_y * block_size_y,
-                                this_block_size_x, this_block_size_y, band + 1);
-                    }
-                }
-            }
+                    out_geo_rtc_gamma0_to_sigma0, out_geo_rtc_gamma0_to_sigma0_array,
+                    out_mask, out_mask_array);
 
             return;
         }
@@ -2385,11 +2755,28 @@ void Geocode<T>::_runBlock(
                                            grid_size_x);
 
         if (flag_apply_rtc) {
-
             rtc_area_block.resize(
                     radar_grid_block.length(), radar_grid_block.width());
             rtc_raster->getBlock(rtc_area_block.data(), offset_x, offset_y,
                     radar_grid_block.width(), radar_grid_block.length(), 1);
+
+           if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                rtc_area_sigma_block.resize(radar_grid_block.length(),
+                                            radar_grid_block.width());
+                rtc_sigma0_raster->getBlock(
+                    rtc_area_sigma_block.data(), offset_x, offset_y,
+                    radar_grid_block.width(), radar_grid_block.length(), 1);
+            }
+
+        }
+
+        if (input_layover_shadow_mask_raster != nullptr) {
+            input_layover_shadow_mask_block.resize(
+                    radar_grid_block.length(), radar_grid_block.width());
+            input_layover_shadow_mask_raster->getBlock(
+                input_layover_shadow_mask_block.data(),
+                offset_x, offset_y, radar_grid_block.width(),
+                radar_grid_block.length(), 1);
         }
 
         _getUpsampledBlock<T, T2>(rdrDataBlock, input_raster,
@@ -2405,18 +2792,28 @@ void Geocode<T>::_runBlock(
         geoDataBlock.emplace_back(std::make_unique<isce3::core::Matrix<T_out>>(
                 this_block_size_y, this_block_size_x));
 
+    nan_t_out *= std::numeric_limits<T_out_real>::quiet_NaN();
+ 
     for (int band = 0; band < nbands; ++band)
-        geoDataBlock[band]->fill(0);
+        geoDataBlock[band]->fill(nan_t_out);
 
     std::vector<std::unique_ptr<isce3::core::Matrix<T>>> geoDataBlockOffDiag;
     if (nbands_off_diag_terms > 0) {
         geoDataBlockOffDiag.reserve(nbands_off_diag_terms);
+
+        // set NaN values according to T_out, i.e. real (NaN) or complex (NaN,
+        // NaN)
+        using T_out_real = typename isce3::real<T>::type;
+        T nan_t = 0;
+        nan_t *= std::numeric_limits<T_out_real>::quiet_NaN();
+
         for (int band = 0; band < nbands_off_diag_terms; ++band)
             geoDataBlockOffDiag.emplace_back(
                     std::make_unique<isce3::core::Matrix<T>>(
                             this_block_size_y, this_block_size_x));
+
         for (int band = 0; band < nbands_off_diag_terms; ++band)
-            geoDataBlockOffDiag[band]->fill(0);
+            geoDataBlockOffDiag[band]->fill(nan_t);
     }
     /*
 
@@ -2521,7 +2918,9 @@ void Geocode<T>::_runBlock(
                 int converged = _geo2rdrWrapper(
                         dem_interp_block.proj()->inverse(dem11), _ellipsoid,
                         _orbit, _doppler, a11, r11, radar_grid.wavelength(),
-                        radar_grid.lookSide(), _threshold, _numiter, 1.0e-8);
+                        radar_grid.lookSide(), az_time_correction,
+                        slant_range_correction, _threshold, _numiter, 1.0e-8);
+
                 if (!converged) {
                     a11 = std::numeric_limits<double>::quiet_NaN();
                     r11 = std::numeric_limits<double>::quiet_NaN();
@@ -2694,13 +3093,27 @@ void Geocode<T>::_runBlock(
             }
 
             double nlooks = 0;
-            float area_total = 0;
+            float area_total = 0, area_sigma_total = 0;
             std::vector<T_out> cumulative_sum(nbands, 0);
             std::vector<T> cumulative_sum_off_diag_terms(nbands_off_diag_terms,
                                                          0);
+            // flag `mask_fill_value` to indicate whether the output mask pixel
+            // should be kept as fill value
+            bool mask_fill_value = true;
 
-            std::vector<int> samples_sub_swath_counts;
-            // std::map<short, int> samples_sub_swath_counts;
+            // flag to indicate whether the averaging ensemble at least one
+            // invalid sample
+            bool flag_has_invalid_sample = false;
+
+            // sub_swaths is an optional parameter. If it isn't given, default to 1.
+            int sub_swaths_number = 1;
+            if (sub_swaths != nullptr && sub_swaths->numSubSwaths() > 0) {
+                sub_swaths_number = sub_swaths->numSubSwaths();
+            }
+
+            // initialize vector that will store the number of radar samples
+            // for each subswath
+            std::vector<int> samples_sub_swath_counts(sub_swaths_number, 0);
 
             // add all slant-range elements that contributes to the geogrid
             // pixel
@@ -2722,16 +3135,59 @@ void Geocode<T>::_runBlock(
                         continue;
                     }
 
-                    short sample_sub_swath = 1;
+                    /* 
+                    If there's at least one pixel that is
+                    considered `valid` within the radar grid
+                    boundaries, the output mask layer won't be
+                    populated with fill value anymore
+                    */
+                    mask_fill_value = false;
+
+                    uint8_t sample_sub_swath = 0;
                     if (sub_swaths != nullptr) {
-                        sub_swaths->getSampleSubSwath(y, x);
-                    
-                        // Check if radar sample is invalid (radar-grid
-                        // single-block)
-                        if (sub_swaths != nullptr &&
-                                sub_swaths->getSampleSubSwath(y, x) == 0) {
+                        sample_sub_swath = sub_swaths->getSampleSubSwath(y, x);
+
+                        // If sub-swath masking is enabled and current sample
+                        // is invalid, continue to the next pixel
+                        if (apply_valid_samples_sub_swath_masking &&
+                                sample_sub_swath == 0) {
                             continue;
                         }
+
+                        // IF there's at least one invalid sample in the
+                        // averaging ensemble, set `flag_has_invalid_sample` flag
+                        flag_has_invalid_sample |= sample_sub_swath == 0;
+
+                    }
+
+                    /*
+                    If the sample is marked as shadow or layover-and-shadow,
+                    we continue to the next position. The input
+                    layover/shadow mask, if provided, is available as:
+                    - (1) a "single block" if `is_radar_grid_single_block`
+                        is true through the variable `input_layover_shadow_mask`
+                    - (2) multiple blocks with varying sizes if `is_radar_grid_single_block`
+                        is false through the variable `input_layover_shadow_mask_block`
+
+                    The `x` and `y` coordinates locate the point over the radar grid.
+                    If the layover shadow block is being read in multiple blocks, we
+                    also need to add `offset_x` and `offset_y` that represent the offsets
+                    in X- and Y- directions over the radar-grid coordinates.
+
+                    in which case we skip to the next position, i.e., we "break" the 
+                    2 inner for-loop bellow (vars: yy and xx) and "continue" from the parent
+                    for-loop (var: kk) above.
+                    */
+                    else if (input_layover_shadow_mask_raster != nullptr &&
+                             ((is_radar_grid_single_block &&
+                              (input_layover_shadow_mask(y, x) == SHADOW_VALUE ||
+                               input_layover_shadow_mask(y, x) == LAYOVER_AND_SHADOW_VALUE)) ||
+                              (!is_radar_grid_single_block &&
+                              (input_layover_shadow_mask_block(
+                                   y - offset_y, x - offset_x) == SHADOW_VALUE ||
+                               input_layover_shadow_mask_block(
+                                   y - offset_y, x - offset_x) == LAYOVER_AND_SHADOW_VALUE)))) {
+                        continue;
                     }
 
                     w = std::abs(w);
@@ -2745,32 +3201,32 @@ void Geocode<T>::_runBlock(
                         }
                         if (std::isnan(rtc_value) || rtc_value < rtc_min_value)
                             continue;
+
                         nlooks += w;
                         if (isce3::is_complex<T_out>())
                             rtc_value = std::sqrt(rtc_value);
                         area_total += rtc_value * w;
+
+                        if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                            float rtc_value_sigma;
+                            if (is_radar_grid_single_block) {
+                                rtc_value_sigma = rtc_area_sigma(y, x);
+                            } else {
+                                rtc_value_sigma =
+                                    rtc_area_sigma_block(y - offset_y, x - offset_x);
+                            }
+                            area_sigma_total += rtc_value_sigma * w;
+                        }
                         w /= rtc_value;
                     } else {
                         nlooks += w;
                     }
 
-                    if (sub_swaths != nullptr &&
-                            out_valid_samples_sub_swath_mask != nullptr) {
-                        for (int s=0; s < (sample_sub_swath -
-                                         samples_sub_swath_counts.size()); s++) {
-                            samples_sub_swath_counts.push_back(0);
-                        }
-                        /*
-                        std::cout << "sample_sub_swath: " << std::to_string(sample_sub_swath) << std::endl;
-                        std::cout << "samples_sub_swath_counts.size(): " << std::to_string(samples_sub_swath_counts.size()) << std::endl;
-                        std::cout << "b0: " << std::to_string(samples_sub_swath_counts[0]) << std::endl;
-                        std::cout << "b: " << std::to_string(samples_sub_swath_counts[sample_sub_swath]) << std::endl;
-                        */
+                    // If the sample belongs to a valid-subswath, update sub-swath vector
+                    // count
+                    if (sub_swaths != nullptr && out_mask != nullptr &&
+                            sample_sub_swath != 0) {
                         samples_sub_swath_counts[sample_sub_swath - 1]++;
-                        /*
-                        std::cout << "a0: " << std::to_string(samples_sub_swath_counts[0]) << std::endl;
-                        std::cout << "a: " << std::to_string(samples_sub_swath_counts[sample_sub_swath]) << std::endl;
-                        */
                     }
 
                     int band_index = 0;
@@ -2813,6 +3269,16 @@ void Geocode<T>::_runBlock(
                     break;
             }
 
+            /*
+            If we need to output the mask layer AND the current geogrid pixel
+            contains radar samples (valid or invalid) inside the radar grid, 
+            initialize the output mask with `0` (originally it has fill value
+            `255`)
+            */
+            if (out_mask != nullptr && !mask_fill_value) {
+                out_mask_array(i, j) = 0;
+            }
+
             // ignoring boundary or low-sampled area elements
             if (std::isnan(nlooks) ||
                 nlooks < isce3::core::AREA_PROJECTION_MIN_VALID_SAMPLES_RATIO *
@@ -2821,12 +3287,23 @@ void Geocode<T>::_runBlock(
                  nlooks * radar_grid_nlooks <= min_nlooks))
                 continue;
 
-            if (sub_swaths != nullptr &&
-                    out_valid_samples_sub_swath_mask != nullptr) {
-                short max_sub_swath = distance(samples_sub_swath_counts.begin(),
+            /*
+            If we need to output the mask layer AND the geogrid pixel contains
+            no partially-focused/invalid samples and the sub-swath object is
+            provided, enter IF statement
+            */
+            if (out_mask != nullptr && !flag_has_invalid_sample &&
+                    sub_swaths != nullptr) {
+                /*
+                Store the sub-swath number bits with the maximum count within
+                the averaging ensemble.
+                */
+                uint8_t max_sub_swath = distance(
+                    samples_sub_swath_counts.begin(),
                     max_element(samples_sub_swath_counts.begin(),
-                                samples_sub_swath_counts.end()));
-                out_valid_samples_sub_swath_mask_array(i, j) = max_sub_swath + 1;
+                                samples_sub_swath_counts.end())) + 1;
+                out_mask_array(i, j) = max_sub_swath;
+
             }
 
             // save geo-edges
@@ -2863,8 +3340,12 @@ void Geocode<T>::_runBlock(
 
             if (flag_apply_rtc) {
                 area_total /= nlooks;
+                if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                    area_sigma_total /= nlooks;
+                }
             } else {
                 area_total = 1;
+                area_sigma_total = 1;
             }
 
             // save nlooks
@@ -2882,19 +3363,53 @@ void Geocode<T>::_runBlock(
                 out_geo_rtc_array(y, x) += (area_total / (geogrid_upsampling *
                                                           geogrid_upsampling));
 
-            // divide by total and save result in the output array
-            for (int band = 0; band < nbands; ++band)
-                geoDataBlock[band]->operator()(y, x) += ((T_out)(
+            // save rtc (gamma0 to sigma0)
+            if (out_geo_rtc_gamma0_to_sigma0 != nullptr) {
+                /*
+                The RTC area normalization factor (ANF) gamma0 to sigma0
+                is computed from the RTC ANF gamma0 to beta0 (or
+                sigma0-ellipsoid) `area_total` divided by the RTC ANF sigma0
+                to beta0 `area_sigma_total`
+                */
+                const double rtc_gamma0_to_sigma0 = area_total / area_sigma_total;
+                if (std::isnan(out_geo_rtc_gamma0_to_sigma0_array(y, x))) {
+                    out_geo_rtc_gamma0_to_sigma0_array(y, x) = (
+                        rtc_gamma0_to_sigma0 / (geogrid_upsampling *
+                        geogrid_upsampling));
+                }
+                else {
+                    out_geo_rtc_gamma0_to_sigma0_array(y, x) += (
+                        rtc_gamma0_to_sigma0 / (geogrid_upsampling *
+                        geogrid_upsampling));
+                }
+            }
+
+            // compute backscatter contribution v and update output arrays
+
+            for (int band = 0; band < nbands; ++band) {
+                T_out v = (static_cast<T_out>(
                         (cumulative_sum[band]) * abs_cal_factor_effective /
                         (nlooks * geogrid_upsampling * geogrid_upsampling)));
-
+                if (std::isnan(std::abs(geoDataBlock[band]->operator()(y, x)))) {
+                    geoDataBlock[band]->operator()(y, x) = v;
+                }
+                else {
+                    geoDataBlock[band]->operator()(y, x) += v;
+                }
+            }
             if (nbands_off_diag_terms > 0) {
                 for (int band = 0; band < nbands_off_diag_terms; ++band) {
-                    geoDataBlockOffDiag[band]->operator()(y, x) +=
-                            ((T)((cumulative_sum_off_diag_terms[band]) *
+                    T v = (static_cast<T>((cumulative_sum_off_diag_terms[band]) *
                                  abs_cal_factor_effective /
                                  (nlooks * geogrid_upsampling *
                                   geogrid_upsampling)));
+                    if (std::isnan(std::abs(
+                            geoDataBlockOffDiag[band]->operator()(y, x)))) {
+                        geoDataBlockOffDiag[band]->operator()(y, x) = v;
+                    }
+                    else {
+                        geoDataBlockOffDiag[band]->operator()(y, x) += v;
+                    }
                 }
             }
         }
@@ -2905,8 +3420,8 @@ void Geocode<T>::_runBlock(
                 T_out geo_value = geoDataBlock[band]->operator()(i, j);
 
                 // no data
-                if (std::abs(geo_value) == 0)
-                    geoDataBlock[band]->operator()(i, j) = nan_t_out;
+                if (std::isnan(std::abs(geo_value)))
+                    continue;
 
                 // clip min (complex)
                 else if (!std::isnan(clip_min) &&
@@ -2948,22 +3463,13 @@ void Geocode<T>::_runBlock(
         for (int band = 0; band < nbands_off_diag_terms; ++band) {
             for (int i = 0; i < this_block_size_y; ++i) {
                 for (int j = 0; j < this_block_size_x; ++j) {
-                    /*
-                    Since std::numeric_limits<T_out>::quiet_NaN() with
-                    complex T_out is (or may be) undefined, we take the "real type"
-                    if T_out (i.e. float or double) to create the NaN value and
-                    multiply it by the current pixel so that the output will be
-                    real or complex depending on T_out and will contain NaNs.
-                    */
-                    using T_real = typename isce3::real<T>::type;
+
                     T geo_value_off_diag =
                             geoDataBlockOffDiag[band]->operator()(i, j);
 
                     // no data (complex)
-                    if (std::abs(geo_value_off_diag) == 0)
-                        geoDataBlockOffDiag[band]->operator()(i, j) =
-                                std::numeric_limits<T_real>::quiet_NaN() *
-                                geo_value_off_diag;
+                    if (std::isnan(std::abs(geo_value_off_diag)))
+                        continue;
 
                     // clip min (complex)
                     else if (!std::isnan(clip_min) &&
@@ -2999,8 +3505,8 @@ void Geocode<T>::_runBlock(
             this_block_size_with_upsampling_y, out_geo_rdr, out_geo_rdr_a,
             out_geo_rdr_r, out_geo_dem, out_geo_dem_array, out_geo_nlooks,
             out_geo_nlooks_array, out_geo_rtc, out_geo_rtc_array,
-            out_valid_samples_sub_swath_mask,
-            out_valid_samples_sub_swath_mask_array);
+            out_geo_rtc_gamma0_to_sigma0, out_geo_rtc_gamma0_to_sigma0_array,
+            out_mask, out_mask_array);
 }
 
 /** Convert enum output_mode to string */
