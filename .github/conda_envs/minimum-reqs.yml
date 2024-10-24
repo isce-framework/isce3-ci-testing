@@ -5,7 +5,7 @@ channels:
 dependencies:
   - backoff
   - cmake=3.19
-  - cxx-compiler
+  - cxx-compiler=11
   - eigen=3.3
   - fftw=3.3
   # GDAL 3.0 is too old to satisfy python>=3.9
@@ -19,8 +19,7 @@ dependencies:
   - pandas
   - pyaps3=0.3
   - pybind11=2.5
-  # TODO exclude pyre so it is built from source
-  - pyre
+  # pyre not included in this build
   - pysolid
   - pytest
   - python=3.9
