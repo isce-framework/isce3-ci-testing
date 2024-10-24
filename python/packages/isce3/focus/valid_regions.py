@@ -315,7 +315,7 @@ def transform_polygons_raw2image(*, raw_polygon_lists, orbit, lookside,
             # geometry.  Spacing specified in length units, so scale
             # (length = velocity * time) and then back.
             raw_poly = multiply_vel(raw_poly)
-            if raw_poly.has_attr("segmentize"):
+            if hasattr(raw_poly, "segmentize"):
                 raw_poly = raw_poly.segmentize(max_segment_length)
             else:
                 # Compatibility fallback for shapely < v2 - use OGR instead
