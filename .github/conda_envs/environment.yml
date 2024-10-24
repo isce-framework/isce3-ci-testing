@@ -26,6 +26,6 @@ dependencies:
   - python>=3.9
   - ruamel.yaml
   - scipy!=1.10.0
-  - shapely>=2.0
+  - shapely>=1.8
   - snaphu>=0.4
   - yamale
