@@ -7,6 +7,7 @@ from nisar.products.writers.SLC import fill_partial_granule_id
 from pathlib import Path
 import pytest
 import shapely
+import shapely.wkt
 
 
 @pytest.fixture
@@ -67,7 +68,7 @@ def test_rslc(raw_filename, frame_wkt, expected_granule_id):
     t0 = raw.identification.zdStartTime
     t1 = raw.identification.zdEndTime
     frame_polygon = shapely.wkt.loads(frame_wkt)
-    image_polygon = shapely.from_wkt(raw.identification.boundingPolygon)
+    image_polygon = shapely.wkt.loads(raw.identification.boundingPolygon)
 
     partial_granule_id = ("NISAR_L1_PR_RSLC_001_001_A_004_{MODE}_{POLE}_A"
         "_{StartDateTime}_{EndDateTime}_D00340_P_{C}_J_001")
