@@ -7,7 +7,7 @@ import numpy.testing as npt
 from pathlib import Path
 import pytest
 import shapely
-import shapely.wkt
+import shapely.geometry, shapely.wkt
 import tempfile
 
 swath_wkt = """POLYGON ((117.888163837239 -84.2118220075399 2990.49633788733,
@@ -65,7 +65,7 @@ def dem():
 def test_dem_polygon_is_counter_clockwise(dem):
     ogr_poly = get_dem_boundary_polygon(dem)
     polygon = shapely.wkt.loads(ogr_poly.ExportToWkt())
-    npt.assert_(shapely.is_ccw(polygon.boundary))
+    npt.assert_(polygon.exterior.is_ccw)
 
 
 def test_dem_overlap(dem):
@@ -80,7 +80,7 @@ def test_polygon_overlap():
     assert_close = lambda x, y: npt.assert_allclose(x, y, rtol=1e-4, atol=1e-4)
 
     # unit square on the equator
-    poly1 = shapely.Polygon([
+    poly1 = shapely.geometry.Polygon([
         (0, 0),
         (1, 0),
         (1, 1),
@@ -92,7 +92,7 @@ def test_polygon_overlap():
     assert_close(area, 1.0)
 
     # longitude cut in half
-    poly2 = shapely.Polygon([
+    poly2 = shapely.geometry.Polygon([
         (0, 0),
         (0.5, 0),
         (0.5, 1),

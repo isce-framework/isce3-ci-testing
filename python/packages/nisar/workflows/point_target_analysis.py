@@ -991,7 +991,7 @@ def process_corner_reflector_csv(
     )
 
     # Filter out CRs outside the RSLC bounding polygon.
-    polygon = shapely.from_wkt(rslc.identification.boundingPolygon)
+    polygon = shapely.wkt.loads(rslc.identification.boundingPolygon)
     corner_reflectors = isce3.cal.get_crs_in_polygon(corner_reflectors, polygon)
 
     # Analyze point targets.

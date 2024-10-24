@@ -12,7 +12,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import numpy as np
-import shapely
+import shapely, shapely.wkt
 
 from isce3.cal import (
     get_crs_in_polygon,
@@ -573,7 +573,7 @@ def analyze_gslc_point_targets_csv(
     )
 
     # Filter out CRs outside the GSLC bounding polygon.
-    polygon = shapely.from_wkt(gslc.identification.boundingPolygon)
+    polygon = shapely.wkt.loads(gslc.identification.boundingPolygon)
     corner_reflectors = get_crs_in_polygon(corner_reflectors, polygon)
 
     cr_optimum_heading = est_cr_az_mid_swath_from_slc(slc=gslc)

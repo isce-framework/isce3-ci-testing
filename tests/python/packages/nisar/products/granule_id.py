@@ -66,7 +66,7 @@ def test_rslc(raw_filename, frame_wkt, expected_granule_id):
     mode = nisar.mixed_mode.PolChannelSet.from_raw(raw)
     t0 = raw.identification.zdStartTime
     t1 = raw.identification.zdEndTime
-    frame_polygon = shapely.from_wkt(frame_wkt)
+    frame_polygon = shapely.wkt.loads(frame_wkt)
     image_polygon = shapely.from_wkt(raw.identification.boundingPolygon)
 
     partial_granule_id = ("NISAR_L1_PR_RSLC_001_001_A_004_{MODE}_{POLE}_A"

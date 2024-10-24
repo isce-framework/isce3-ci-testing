@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import numpy.testing as npt
 import pytest
-import shapely
+import shapely, shapely.geometry
 from numpy.random import default_rng
 from numpy.typing import ArrayLike
 
@@ -240,7 +240,7 @@ def test_get_crs_in_polygon():
     # Create a rectangular lon/lat polygon.
     lon0, lon1 = -2.0, 2.0
     lat0, lat1 = -0.5, 0.5
-    lonlat_polygon = shapely.Polygon(
+    lonlat_polygon = shapely.geometry.Polygon(
         [
             (lon0, lat0),
             (lon0, lat1),

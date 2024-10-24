@@ -5,7 +5,8 @@ import numpy as np
 from numpy.linalg import norm
 from numpy.testing import assert_allclose
 import os
-from shapely import Polygon
+import shapely.geometry
+from shapely.geometry import Polygon
 from typing import Optional
 import isce3
 from isce3.core import LUT2d, DateTime, Orbit, Attitude, Quaternion, Ellipsoid
@@ -276,9 +277,9 @@ def fill_partial_granule_id(partial_granule_id: str, output_mode: PolChannelSet,
         Zero-Doppler start time of the output product.
     end_datetime : isce3.core.DateTime
         Zero-Doppler end time of the output product.
-    frame_polygon : shapely.Polygon
+    frame_polygon : shapely.geometry.Polygon
         Polygon corresponding to the desired image area (track & frame).
-    image_polygon : shapely.Polygon
+    image_polygon : shapely.geometry.Polygon
         Polygon of actual image footprint.
     coverage_threshold : float, optional
         Fraction of frame that must be imaged to be considered full coverage.

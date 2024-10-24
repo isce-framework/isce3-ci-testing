@@ -8,6 +8,7 @@ import re
 
 import backoff
 import numpy as np
+import shapely.geometry
 import shapely.ops
 import shapely.wkt
 from osgeo import gdal, osr
@@ -120,7 +121,7 @@ def determine_polygon(ref_slc, bbox=None):
 
     Returns
     -------
-    poly: shapely.Geometry.Polygon
+    poly: shapely.geometry.Polygon
         Bounding polygon corresponding to RSLC perimeter
         or bbox shape on the ground
     """
@@ -180,7 +181,7 @@ def get_geo_polygon(ref_slc, min_height=-500.,
 
     Returns
     -------
-    poly: shapely.Geometry.Polygon
+    poly: shapely.geometry.Polygon
         Bounding polygon corresponding to RSLC perimeter on the ground
     """
     from isce3.core import LUT2d  # pylint: disable=import-error
@@ -222,7 +223,7 @@ def determine_projection(polys):
 
     Parameters
     ----------
-    polys: shapely.Geometry.Polygon
+    polys: shapely.geometry.Polygon
         List of shapely Polygons
 
     Returns
@@ -438,7 +439,7 @@ def transform_polygon_coords(polys, epsgs):
 
     Parameters
     ----------
-    polys: shapely.Geometry.Polygon
+    polys: shapely.geometry.Polygon
         List of shapely polygons
     epsg: list, str
         List of EPSG codes corresponding to
@@ -540,7 +541,7 @@ def apply_margin_polygon(polygon, margin_in_km=5):
 
     Parameters
     ----------
-    polygon: shapely.Geometry.Polygon
+    polygon: shapely.geometry.Polygon
         Bounding polygon covering the area on the
         ground over which download the DEM
     margin_in_km: np.float
@@ -548,7 +549,7 @@ def apply_margin_polygon(polygon, margin_in_km=5):
 
     Returns
     ------
-    poly_with_margin: shapely.Geometry.box
+    poly_with_margin: shapely.geometry.box
         Bounding box with margin applied
     '''
     lon_min, lat_min, lon_max, lat_max = polygon.bounds

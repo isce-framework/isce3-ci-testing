@@ -5,8 +5,10 @@ from osgeo import ogr, osr, gdal
 import textwrap
 from typing import Union
 import shapely
-from shapely import Polygon, MultiPolygon
+from shapely.geometry import Polygon, MultiPolygon
 import shapely.affinity
+import shapely.geometry
+import shapely.ops
 import shapely.wkt
 try:
     import shapely.plotting
@@ -98,7 +100,7 @@ def plot_shapely_polygon_km(poly, add_points=False, **opts):
 
     Parameters
     ----------
-    poly : shapely.Polygon
+    poly : shapely.geometry.Polygon
         Polygon object, with coordinates in meters.
     add_points : bool, optional
         Whether to add markers for all vertices.
@@ -239,7 +241,7 @@ def shapely2ogr_polygon(poly: Union[Polygon, MultiPolygon],
 
     Parameters
     ----------
-    poly : Union[shapely.Polygon, shapely.MultiPolygon]
+    poly : Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon]
         Input shapely Polygon
     h : float
         Height to use if polygon doesn't have Z values.
@@ -249,22 +251,9 @@ def shapely2ogr_polygon(poly: Union[Polygon, MultiPolygon],
     polygon : ogr.Geometry
         Output OGR polygon (or multi-polygon)
     """
-    if isinstance(poly, MultiPolygon):
-        out = ogr.Geometry(ogr.wkbMultiPolygon)
-        for p in poly.geoms:
-            out.AddGeometry(shapely2ogr_polygon(p))
-        return out
+    f = lambda x, y, z=h: (x, y, z)
 
-    ring = ogr.Geometry(ogr.wkbLinearRing)
-    for point in shapely.get_coordinates(poly, include_z=True):
-        lon, lat, z = point
-        if not poly.has_z:
-            z = h
-        ring.AddPoint(lon, lat, z)
-
-    polygon = ogr.Geometry(ogr.wkbPolygon)
-    polygon.AddGeometry(ring)
-    return polygon
+    return ogr.CreateGeometryFromWkb(shapely.ops.transform(f, polygon).wkb)
 
 
 def compute_polygon_overlap(poly1: Union[Polygon, MultiPolygon],
@@ -275,9 +264,9 @@ def compute_polygon_overlap(poly1: Union[Polygon, MultiPolygon],
 
     Parameters
     ----------
-    poly1 : Union[shapely.Polygon, shapely.MultiPolygon]
+    poly1 : Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon]
         Polygon where (x, y) correspond to (longitude, latitude) in degrees.
-    poly2 : Union[shapely.Polygon, shapely.MultiPolygon]
+    poly2 : Union[shapely.geometry.Polygon, shapely.geometry.MultiPolygon]
         Polygon where (x, y) correspond to (longitude, latitude) in degrees.
 
     Returns

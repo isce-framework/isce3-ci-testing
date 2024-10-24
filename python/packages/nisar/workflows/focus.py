@@ -1668,8 +1668,8 @@ def focus(runconfig, runconfig_path=""):
     end_time = og.sensing_datetime(og.length - 1)
     granule_id = fill_partial_granule_id(
         cfg.primary_executable.partial_granule_id, common_mode, start_time,
-        end_time, shapely.from_geojson(cfg.geometry.track_frame_polygon),
-        shapely.from_wkt(polygon),
+        end_time, shapely.geometry.shape(cfg.geometry.track_frame_polygon),
+        shapely.wkt.loads(polygon),
         coverage_threshold = cfg.geometry.full_coverage_threshold_percent / 100)
 
     is_dithered=any(raw.isDithered(raw.frequencies[0]) for raw in rawlist)

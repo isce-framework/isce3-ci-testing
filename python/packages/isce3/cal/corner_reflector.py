@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-import shapely
+import shapely, shapely.geometry
 from numpy.typing import ArrayLike
 
 import isce3
@@ -454,7 +454,7 @@ def get_target_observation_time_and_elevation(
 
 def get_crs_in_polygon(
     crs: Iterable[TriangularTrihedralCornerReflector],
-    polygon: shapely.Polygon,
+    polygon: shapely.geometry.Polygon,
     buffer: float | None = None,
 ) -> Iterator[TriangularTrihedralCornerReflector]:
     """
@@ -471,7 +471,7 @@ def get_crs_in_polygon(
     ----------
     crs : iterable of TriangularTrihedralCornerReflector
         Input iterable of corner reflector data.
-    polygon : shapely.Polygon
+    polygon : shapely.geometry.Polygon
         A convex polygon, in geodetic Lon/Lat coordinates w.r.t the WGS 84 ellipsoid,
         enclosing the area of interest. Longitude (x) coordinates should be specified in
         degrees in the range [-180, 180]. Latitude (y) coordinates should be specified
@@ -514,6 +514,6 @@ def get_crs_in_polygon(
         lon_lat_deg = np.rad2deg([wrap(lon), lat])
 
         # Check whether the corner reflector is in the polygon.
-        point = shapely.Point(lon_lat_deg)
+        point = shapely.geometry.Point(lon_lat_deg)
         if polygon.contains(point):
             yield cr

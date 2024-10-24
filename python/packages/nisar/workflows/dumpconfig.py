@@ -668,7 +668,7 @@ def dumpconfig_gslc_gcov(
     elif epsg is None and generate_epsg:
         # Get the parent RSLC bounding polygon
         polygon = rslc.identification.boundingPolygon
-        centroid = shapely.centroid(shapely.wkt.loads(polygon))
+        centroid = shapely.wkt.loads(polygon).centroid
 
         # Get the EPSG of the centerpoint
         default_epsg = point_to_epsg(lon=centroid.x, lat=centroid.y)

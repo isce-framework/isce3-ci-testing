@@ -6,7 +6,7 @@ from functools import reduce
 import isce3
 import numpy as np
 import shapely
-import shapely.affinity  # need explicit import for older versions
+import shapely.affinity, shapely.geometry  # need explicit import for older versions
 from typing import Iterator
 
 
@@ -94,7 +94,7 @@ def get_raw_sub_swath_polygons(*, raw_bbox_lists, chirp_durations, orbit,
 
     Returns
     -------
-    raw_polygon_lists : list[list[shapely.Polygon]]
+    raw_polygon_lists : list[list[shapely.geometry.Polygon]]
         List of valid data regions for each file/observation specified in
         raw radar (x=range, y=time) coordinates (e.g., native Doppler).
 
@@ -142,7 +142,7 @@ def get_raw_sub_swath_polygons(*, raw_bbox_lists, chirp_durations, orbit,
 
         def to_polygon(self):
             # CCW order (though CW if viewed with the usual inverted time).
-            return shapely.Polygon([(pt.range, pt.time) for pt in
+            return shapely.geometry.Polygon([(pt.range, pt.time) for pt in
                 [self.near_begin, self.far_begin, self.far_end, self.near_end,
                     self.near_begin]])
 
@@ -248,7 +248,7 @@ def transform_polygons_raw2image(*, raw_polygon_lists, orbit, lookside,
 
     Parameters
     ----------
-    raw_polygon_lists : list[list[shapely.Polygon]]
+    raw_polygon_lists : list[list[shapely.geometry.Polygon]]
         List of valid data regions for each file/observation specified in
         raw radar (x=range, y=time) coordinates (e.g., native Doppler).
     orbit : isce3.core.Orbit
@@ -275,7 +275,7 @@ def transform_polygons_raw2image(*, raw_polygon_lists, orbit, lookside,
 
     Returns
     -------
-    slc_polygon_lists : list[list[shapely.Polygon]]
+    slc_polygon_lists : list[list[shapely.geometry.Polygon]]
         List of valid data regions for each file/observation specified in
         focused radar image (x=range, y=time) coordinates.
     """
@@ -327,7 +327,7 @@ def transform_polygons_raw2image(*, raw_polygon_lists, orbit, lookside,
                 slc_coords.append((r, t))
             # Just in case rdr2rdr is not deterministic, force closed polygon.
             slc_coords[-1] = slc_coords[0]
-            slc_polygons.append(shapely.Polygon(slc_coords))
+            slc_polygons.append(shapely.geometry.Polygon(slc_coords))
         slc_polygon_lists.append(slc_polygons)
 
     return slc_polygon_lists
@@ -339,7 +339,7 @@ def rasterize_subswath_polygons(slc_polygon_lists, slc_grid, threshold=2):
 
     Parameters
     ----------
-    slc_polygon_lists : list[list[shapely.Polygon]]
+    slc_polygon_lists : list[list[shapely.geometry.Polygon]]
         List of valid data regions for each file/observation specified in
         focused radar image (x=range, y=time) coordinates.
     slc_grid : isce3.product.RadarGridParameters
@@ -377,7 +377,7 @@ def rasterize_subswath_polygons(slc_polygon_lists, slc_grid, threshold=2):
     for itime in range(slc_grid.shape[0]):
         # Scanline corresponding to a row of the radar image grid.
         t = slc_grid.sensing_times[itime]
-        line = shapely.LineString([(r0, t), (r1, t)])
+        line = shapely.geometry.LineString([(r0, t), (r1, t)])
         # Initialize to start=end, e.g., all subswaths empty/invalid.
         tmp_swaths[...] = 0
 
