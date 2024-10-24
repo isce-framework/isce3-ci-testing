@@ -5,7 +5,7 @@ channels:
 dependencies:
   - backoff
   - cmake=3.19
-  - cxx-compiler=11
+  - gxx_linux=11
   - eigen=3.3
   - fftw=3.3
   # GDAL 3.0 is too old to satisfy python>=3.9
