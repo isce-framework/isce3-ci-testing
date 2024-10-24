@@ -6,7 +6,10 @@ from functools import reduce
 import isce3
 import numpy as np
 import shapely
-import shapely.affinity, shapely.geometry  # need explicit import for older versions
+# need explicit imports for older versions
+import shapely.affinity
+import shapely.geometry
+import shapely.wkt
 from typing import Iterator
 
 
@@ -311,7 +314,16 @@ def transform_polygons_raw2image(*, raw_polygon_lists, orbit, lookside,
             # Add intermediate points between corners before tranforming
             # geometry.  Spacing specified in length units, so scale
             # (length = velocity * time) and then back.
-            raw_poly = multiply_vel(raw_poly).segmentize(max_segment_length)
+            raw_poly = multiply_vel(raw_poly)
+            if raw_poly.has_attr("segmentize"):
+                raw_poly = raw_poly.segmentize(max_segment_length)
+            else:
+                # Compatibility fallback for shapely < v2 - use OGR instead
+                from osgeo import ogr
+                ogr_poly = ogr.CreateGeometryFromWkb(raw_poly.wkb)
+                ogr_poly.Segmentize(max_segment_length)
+                raw_poly = shapely.wkt.loads(ogr_poly.ExportToWkt())
+
             raw_poly = divide_vel(raw_poly)
 
             # Transform from native Doppler to image grid Doppler
