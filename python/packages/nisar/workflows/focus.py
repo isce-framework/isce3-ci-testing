@@ -1668,7 +1668,7 @@ def focus(runconfig, runconfig_path=""):
     end_time = og.sensing_datetime(og.length - 1)
     granule_id = fill_partial_granule_id(
         cfg.primary_executable.partial_granule_id, common_mode, start_time,
-        end_time, shapely.geometry.shape(cfg.geometry.track_frame_polygon),
+        end_time, shapely.geometry.shape(json.loads(cfg.geometry.track_frame_polygon)),
         shapely.wkt.loads(polygon),
         coverage_threshold = cfg.geometry.full_coverage_threshold_percent / 100)
 
