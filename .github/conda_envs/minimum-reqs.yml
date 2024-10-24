@@ -12,7 +12,7 @@ dependencies:
   - gdal=3.1
   - gmock=1.10
   - gtest=1.10
-  - h5py=3.5
+  - h5py=3.6
   - hdf5=1.10.6
   - ninja
   - numpy=1.20
