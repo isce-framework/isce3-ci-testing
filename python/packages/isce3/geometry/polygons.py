@@ -253,7 +253,7 @@ def shapely2ogr_polygon(poly: Union[Polygon, MultiPolygon],
     """
     f = lambda x, y, z=h: (x, y, z)
 
-    return ogr.CreateGeometryFromWkb(shapely.ops.transform(f, polygon).wkb)
+    return ogr.CreateGeometryFromWkb(shapely.ops.transform(f, poly).wkb)
 
 
 def compute_polygon_overlap(poly1: Union[Polygon, MultiPolygon],
