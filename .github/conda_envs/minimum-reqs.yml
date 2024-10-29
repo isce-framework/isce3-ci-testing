@@ -9,7 +9,8 @@ dependencies:
   - eigen=3.3
   - fftw=3.3
   # GDAL 3.0 is too old to satisfy python>=3.9
-  - gdal=3.1
+  # GDAL 3.1 is too old to satisfy hdf5>=1.12
+  - gdal>=3.1
   - gmock=1.10
   - gtest=1.10
   - h5py=3.6
