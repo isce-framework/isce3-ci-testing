@@ -78,14 +78,6 @@ jobs:
         run: |
           micromamba install conda
 
-      # Fixup bad python extension names in pyre package
-      - name: macOS python extension fixup
-        if: runner.os == 'macOS'
-        run: |
-          for f in $(find $CONDA_PREFIX/lib/python*/site-packages/pyre -name '*..so'); do
-            mv -- "$f" "${f%..so}.so"
-          done
-
       # Preset environment variables in the conda environment for later steps
       - name: Environment Variables Preset
         run: |
