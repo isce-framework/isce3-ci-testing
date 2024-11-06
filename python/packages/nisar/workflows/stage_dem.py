@@ -91,7 +91,7 @@ def check_dateline(poly):
         # DEM longitude range
         for polygon_count in range(2):
             x, y = polys[polygon_count].exterior.coords.xy
-            if not any(k > 180 for k in x):
+            if not any([k > 180 for k in x]):  # pylint: disable=use-a-generator
                 continue
 
             # Otherwise, wrap longitude values down to 360 deg
@@ -313,9 +313,9 @@ def translate_dem(vrt_filename, outpath, x_min, x_max, y_min, y_max):
 
     gdal.Translate(outpath, ds, format='GTiff',
                    projWin=[x_min, y_max, x_max, y_min])
-    
+
     # stage_dem.py takes a bbox as an input. The longitude coordinates
-    # of this bbox are unwrapped i.e., range in [0, 360] deg. If the 
+    # of this bbox are unwrapped i.e., range in [0, 360] deg. If the
     # bbox crosses the anti-meridian, the script divides it in two
     # bboxes neighboring the anti-meridian. Here, x_min and x_max
     # represent the min and max longitude coordinates of one of these
@@ -325,11 +325,11 @@ def translate_dem(vrt_filename, outpath, x_min, x_max, y_min, y_max):
     # range of longitudes rather than the full [-180, 180] deg
     sr = osr.SpatialReference(ds.GetProjection())
     epsg_str = sr.GetAttrValue("AUTHORITY", 1)
-    
+
     if x_min <= -180.0 and epsg_str == '4326':
         ds = gdal.Open(outpath, gdal.GA_Update)
         geotransform = list(ds.GetGeoTransform())
-        geotransform[0] += 360.0 
+        geotransform[0] += 360.0
         ds.SetGeoTransform(tuple(geotransform))
 
     ds = None
@@ -465,7 +465,7 @@ def transform_polygon_coords(polys, epsgs):
     """
 
     # Assert validity of inputs
-    assert len(polys) == len(epsgs)
+    assert (len(polys) == len(epsgs))
 
     # Transform each point of the perimeter in target EPSG coordinates
     llh = osr.SpatialReference()
