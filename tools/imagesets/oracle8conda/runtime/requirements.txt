@@ -9,6 +9,7 @@ libgdal-netcdf
 libgomp
 libstdcxx-ng>=9
 matplotlib
+netcdf4
 numpy>=1.20
 pyre>=1.12.5
 pyaps3>=0.3
