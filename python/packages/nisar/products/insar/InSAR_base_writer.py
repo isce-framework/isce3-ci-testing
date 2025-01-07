@@ -921,7 +921,7 @@ class InSARBaseWriter(h5py.File):
         partial_granule_id = primary_exec_cfg.get("partial_granule_id")
         product_type = self.product_info.ProductType.lower()
         product_version = primary_exec_cfg["product_version"].get(f'{product_type}_version')
-        product_doi = primary_exec_cfg["product_doi"].get(f'{product_type}_version')
+        product_doi = primary_exec_cfg["product_doi"].get(f'{product_type}_doi')
         crid = primary_exec_cfg.get("composite_release_id")
 
         # Determine processingType
