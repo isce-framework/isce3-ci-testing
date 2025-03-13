@@ -37,6 +37,7 @@ void addbinding(py::class_<LUT2d<T>> &pyLUT2d)
 
     pyLUT2d
         .def(py::init<>())
+        .def(py::init<const T&>())
         .def(py::init([](double xstart, double ystart,
                     double dx, double dy,
                     py::array_t<T, py::array::c_style | py::array::forcecast> & py_data,
@@ -128,7 +129,9 @@ void addbinding(py::class_<LUT2d<T>> &pyLUT2d)
             py::arg("y"),
             py::arg("x"))
         .def_property_readonly("have_data", &LUT2d<T>::haveData)
-        .def_property_readonly("ref_value", &LUT2d<T>::refValue)
+        .def_property("ref_value",
+            py::overload_cast<>(&LUT2d<T>::refValue, py::const_),
+            py::overload_cast<const T&>(&LUT2d<T>::refValue))
         .def_property_readonly("x_start",   &LUT2d<T>::xStart)
         .def_property_readonly("y_start",   &LUT2d<T>::yStart)
         .def_property_readonly("x_spacing", &LUT2d<T>::xSpacing)
