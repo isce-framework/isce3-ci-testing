@@ -1,6 +1,5 @@
 #include "LUT2d.h"
 
-#include <isce3/core/Constants.h>
 #include <isce3/core/DateTime.h>
 #include <isce3/core/Matrix.h>
 #include <isce3/core/Serialization.h>
@@ -13,23 +12,11 @@
 #include <pybind11/eigen.h>
 #include <pybind11/numpy.h>
 
+#include "Constants.h"
+
 namespace py = pybind11;
 
 using isce3::core::LUT2d;
-
-static dataInterpMethod duck_method(py::object method)
-{
-    using isce3::core::dataInterpMethod;
-    using isce3::core::parseDataInterpMethod;
-    if (py::isinstance<py::str>(method)) {
-        return parseDataInterpMethod(py::str(method));
-    } else if (py::isinstance<dataInterpMethod>(method)) {
-        return method.cast<dataInterpMethod>();
-    } else {
-        throw isce3::except::InvalidArgument(ISCE_SRCINFO(),
-                                            "invalid type for interp method");
-    }
-}
 
 template<typename T>
 void addbinding(py::class_<LUT2d<T>> &pyLUT2d)
