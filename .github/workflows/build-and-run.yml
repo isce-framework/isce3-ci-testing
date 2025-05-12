@@ -22,7 +22,7 @@ jobs:
       matrix:
         os:
           - label: Linux
-            runner: ubuntu-latest
+            runner: ubuntu-gpu-t4
             ctest_exclude: -E ".*($ALL_EXCLUDE)"
           - runner: macos-latest
             label: macOS
