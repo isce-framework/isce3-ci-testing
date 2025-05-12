@@ -26,10 +26,11 @@ jobs:
             ctest_exclude: -E ".*($ALL_EXCLUDE)"
           - runner: macos-latest
             label: macOS
-            ctest_exclude: -E ".*($ALL_EXCLUDE|io\.gdal\.raster|unwrap\.snaphu|background)"
+            ctest_exclude: -E ".*($ALL_EXCLUDE|io\.gdal\.raster|unwrap\.snaphu|background|isce3\.container\.rsd)"
             # io.gdal.raster and unwrap.snaphu tests fail due to known unresolved issues
             # with GDAL memory mapping on macOS.
             # background reader/writer test sometimes fails on macOS due to slow runtimes.
+            # rsd uses GDAL memmapped rasters (TODO: reenable when Geoff's conditional testing logic is merged)
         deps:
           - label: Latest
             env-file: .github/conda_envs/environment.yml
@@ -131,4 +132,5 @@ jobs:
       - name: Test Project
         run: |
           cd build
+          export GDAL_MEM_ENABLE_OPEN=YES
           ctest --output-on-failure ${{ matrix.os.ctest_exclude }}
