@@ -10,7 +10,9 @@ dependencies:
   - fftw=3.3
   # GDAL 3.0 is too old to satisfy python>=3.9
   # GDAL 3.1 is too old to satisfy hdf5>=1.12
-  - gdal>=3.1
+  # GDAL 3.6.0 was the first to build with cmake, needed for FindGDAL module
+  # https://github.com/conda-forge/gdal-feedstock/pull/651
+  - gdal>=3.6
   - gmock=1.10
   - gtest=1.10
   - h5py=3.6
