@@ -124,4 +124,5 @@ jobs:
       - name: Test Project
         run: |
           cd build
+          export GDAL_MEM_ENABLE_OPEN=YES
           ctest --output-on-failure ${{ matrix.os.ctest_exclude }}
