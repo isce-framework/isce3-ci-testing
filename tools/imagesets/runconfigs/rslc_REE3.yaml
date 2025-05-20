@@ -58,7 +58,7 @@ runconfig:
                 # Whether to attempt RFI detection and record related metadata.
                 # Defaults to True
                 detection_enabled: True
-                # Whether to attemt RFI removal. Default to False.
+                # Whether to attempt RFI removal. Default to False.
                 mitigation_enabled: False
                 # Algorithm selection.  Defaults to 'ST-EVD' for slow-time
                 # eigenvalue decomposition.
@@ -150,7 +150,7 @@ runconfig:
             workflows:
                 validate: True
                 qa_reports: True
-                absolute_radiometric_calibration: True
-                nes0: True
-                point_target_analyzer: True
+                point_target_analyzer: true
+                absolute_radiometric_calibration: true
+                noise_equivalent_backscatter: true
 

@@ -10,6 +10,7 @@
 #include <Eigen/Dense>
 #include <valarray>
 #include "Constants.h"
+#include "Linspace.h"
 #include "Matrix.h"
 #include "Utilities.h"
 
@@ -20,7 +21,7 @@ class isce3::core::LUT2d {
 
     public:
         // Constructors
-        inline LUT2d();
+        inline LUT2d(const T& ref_value = T{0});
         inline LUT2d(isce3::core::dataInterpMethod method);
         LUT2d(double xstart, double ystart, double dx, double dy,
               const isce3::core::Matrix<T> & data,
@@ -54,6 +55,10 @@ class isce3::core::LUT2d {
         inline double xStart() const { return _xstart; }
         // Get starting Y-coordinate
         inline double yStart() const { return _ystart; }
+        // Get end X-coordinate
+        inline double xEnd() const { return xStart() + (width() - 1) * xSpacing(); }
+        // Get end Y-coordinate
+        inline double yEnd() const { return yStart() + (length() - 1) * ySpacing(); }
         // Get X-spacing
         inline double xSpacing() const { return _dx; }
         // Get Y-spacing
@@ -62,8 +67,15 @@ class isce3::core::LUT2d {
         inline size_t length() const { return _data.length(); }
         // Get LUT width (number of samples)
         inline size_t width() const { return _data.width(); }
+        // Coordinate axes
+        inline Linspace<double> xAxis() const {
+            return Linspace<double>(xStart(), xSpacing(), width()); }
+        inline Linspace<double> yAxis() const {
+            return Linspace<double>(yStart(), ySpacing(), length()); }
         // Get the reference value
         inline T refValue() const { return _refValue; }
+        // Set the reference value
+        inline void refValue(const T& val) { _refValue = val; }
         // Get flag for having data
         inline bool haveData() const { return _haveData; }
         // Get bounds error flag
@@ -88,10 +100,8 @@ class isce3::core::LUT2d {
                 return true;
             }
 
-            const auto i = (x - xStart()) / xSpacing();
-            const auto j = (y - yStart()) / ySpacing();
-            return (i >= 0.0 and i <= width() - 1.0) and
-                   (j >= 0.0 and j <= length() - 1.0);
+            return (x >= xStart()) and (x <= xEnd()) and
+                   (y >= yStart()) and (y <= yEnd());
         }
 
     private:
@@ -171,7 +181,7 @@ class isce3::core::LUT2d {
 // Default constructor using bilinear interpolator
 template <typename T>
 isce3::core::LUT2d<T>::
-LUT2d() : _haveData(false), _boundsError(true), _refValue(0.0) {
+LUT2d(const T& ref_value) : _haveData(false), _boundsError(true), _refValue(ref_value) {
     _setInterpolator(isce3::core::BILINEAR_METHOD);
 }
 

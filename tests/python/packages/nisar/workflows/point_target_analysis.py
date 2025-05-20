@@ -78,7 +78,9 @@ def test_point_target_analysis(kwargs):
 
 # Treat warnings as test failures (internally, the PTA tool catches errors during
 # processing of each corner reflector and converts them into warnings).
-@pytest.mark.filterwarnings("error")
+@pytest.mark.filterwarnings(
+    "error:an exception occurred while processing corner reflector"
+)
 def test_nisar_csv():
     datadir = Path(iscetest.data) / "abscal"
     cr_csv = datadir / "ree_corner_reflectors_nisar.csv"

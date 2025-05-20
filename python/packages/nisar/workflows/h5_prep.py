@@ -259,7 +259,7 @@ def cp_geocode_meta(cfg, output_hdf5, dst):
 
         # Assign product specification version
         dst_h5[f'{ident_path}/productSpecificationVersion'] = \
-            np.bytes_('0.9.0')
+            np.bytes_('1.2.1')
 
         # Assign granule ID
         dst_h5[f'{ident_path}/granuleId'] = \
@@ -354,7 +354,8 @@ def cp_geocode_meta(cfg, output_hdf5, dst):
                             'azimuthChirpWeighting',
                             'effectiveVelocity', 'rangeChirpWeighting']
         else:
-            exclude_args = ['nes0', 'elevationAntennaPattern']
+            exclude_args = ['noiseEquivalentBackscatter', 'nes0',
+                            'elevationAntennaPattern']
 
         cp_h5_meta_data(src_h5, dst_h5,
                         f'{src_meta_path}/processingInformation/parameters',
@@ -363,7 +364,8 @@ def cp_geocode_meta(cfg, output_hdf5, dst):
         # Copy calibrationInformation group
         exclude_args = []
         if is_insar:
-            exclude_args = ['nes0', 'elevationAntennaPattern']
+            exclude_args = ['noiseEquivalentBackscatter', 'nes0',
+                            'elevationAntennaPattern']
         for freq in freq_pols.keys():
             if dst in ['ROFF', 'GOFF']:
                 cal_path = f'{dst_meta_path}/calibrationInformation'
@@ -550,7 +552,7 @@ def prep_gslc_dataset(cfg, dst, dst_h5):
 
         # create geocoded SLC datasets for polarizations of current frequency
         for polarization in pol_list:
-            long_name = f'geocoded single-look complex image {polarization}'
+            long_name = f'Geocoded single-look complex image {polarization}'
             descr = f'Focused SLC image ({polarization})'
             _create_datasets(dst_grp, shape, ctype, polarization,
                              descr=descr, units='', grids="projection",
@@ -558,11 +560,11 @@ def prep_gslc_dataset(cfg, dst, dst_h5):
                              fill_value=complex_fill_value, **gslc_output_options)
 
         # create geocoded mask for geocoded SLC datasets
-        long_name = f'geocoded mask of single-look complex image'
+        long_name = f'Geocoded mask of single-look complex image'
         descr = f'GSLC mask'
         gslc_output_options['fillvalue'] = 255
         _create_datasets(dst_grp, shape, np.ubyte, 'mask',
-                         descr=descr, units='', grids="projection",
+                         descr=descr, units=None, grids="projection",
                          long_name=long_name, yds=yds, xds=xds,
                          fill_value=255, valid_min=0,
                          **gslc_output_options)
@@ -639,7 +641,7 @@ def _create_datasets(dst_grp, shape, ctype, dataset_name,
         ds.attrs["_FillValue"] = fill_value
 
     if valid_min is not None:
-        ds.attrs["_valid_min"] = valid_min
+        ds.attrs["valid_min"] = valid_min
 
 
 def _add_polarization_list(dst_h5, dst, common_parent_path, frequency, pols):
@@ -908,7 +910,7 @@ def add_radar_grid_cubes_to_hdf5(hdf5_obj, cube_group_name, geogrid,
         cube_group, 'zeroDopplerAzimuthTime', np.float64, cube_shape,
         zds=zds, yds=yds, xds=xds,
         long_name='Zero-Doppler azimuth time',
-        descr='Zero Doppler azimuth time in seconds',
+        descr='Zero Doppler azimuth time in seconds since UTC epoch',
         units=az_coord_units, **create_dataset_kwargs)
     incidence_angle_raster = _get_raster_from_hdf5_ds(
         cube_group, 'incidenceAngle', np.float32, cube_shape,
@@ -1214,7 +1216,7 @@ def set_create_geolocation_grid_coordinates(hdf5_obj, root_ds, radar_grid,
     coordinates_list.append(rg_dataset)
 
     # Zero-doppler time
-    descr = "Zero Doppler time values corresponding to the geolocation grid"
+    descr = "Zero Doppler time since UTC epoch values corresponding to the geolocation grid"
     az_dataset_name = os.path.join(root_ds, 'zeroDopplerTime')
     if az_dataset_name in hdf5_obj:
         del hdf5_obj[az_dataset_name]

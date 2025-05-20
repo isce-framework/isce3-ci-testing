@@ -294,7 +294,7 @@ class Base(pyre.component,
     @property
     def sarBand(self):
         """SAR band string such as 'L' or 'S' for NISAR."""
-        return self.RootPath[-4]        
+        return self.RootPath[-4]
 
     @property
     def IdentificationPath(self):

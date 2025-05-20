@@ -274,7 +274,7 @@ def faraday_rot_angle_from_rslc(args):
             f'FaradayRotAngleCR_{dt_utc_cur}_{dt_first}_{dt_last}.json'
         )
         with open(os.path.join(args.out_dir, name_json_cr), 'w') as fidw:
-            json.dump(fra_slc_crs, fidw, indent=4)
+            json.dump(fra_slc_crs, fidw, indent=4, cls=JsonNumpyEncoder)
 
     # total elapsed time
     logger.info(f'Elapsed time -> {time.time() - tic:.1f} (sec)')

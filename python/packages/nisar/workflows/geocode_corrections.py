@@ -381,7 +381,7 @@ class AzSrgCorrections:
 
             for which_lut, low_res_tec_lut2d in zip(('azimuth TEC correction', 'range TEC correction'),
                                                 (low_res_tec_az, low_res_tec_srange)):
-                lut2d_far_range = low_res_tec_lut2d.x_start + (low_res_tec_lut2d.width - 1) * low_res_tec_lut2d.x_spacing
+                lut2d_far_range = low_res_tec_lut2d.x_end
                 if self.rg_vec[-1] != lut2d_far_range:
                     warning_channel.log('Truncation error detected between '
                                         f'far range of scaled radargrid and {which_lut}. '
@@ -464,7 +464,8 @@ class AzSrgCorrections:
                     HDF5DatasetParams(name=f'{az_rg_str}Ionosphere',
                                       value=az_rg_corr["TEC"],
                                       description=f'2D lookup table of {az_or_los} {what_correction}{derived_from}',
-                                      attr_dict={'units': units}))
+                                      attr_dict={'units': units,
+                                                 '_FillValue': np.nan}))
             if "SET" in az_rg_corr:
                 what_correction = 'solid Earth tides timing correction'
                 derived_from = ''
@@ -472,7 +473,8 @@ class AzSrgCorrections:
                     HDF5DatasetParams(name=f'{az_rg_str}SolidEarthTides',
                                       value=az_rg_corr["SET"],
                                       description=f'2D lookup table of {az_or_los} {what_correction}{derived_from}',
-                                      attr_dict={'units': units}))
+                                      attr_dict={'units': units,
+                                                 '_FillValue': np.nan}))
         for meta_item in correction_items:
             add_dataset_and_attrs(correction_group, meta_item)
 

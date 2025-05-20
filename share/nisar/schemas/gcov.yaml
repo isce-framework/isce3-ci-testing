@@ -54,8 +54,9 @@ runconfig:
         primary_executable:
             product_type: enum('GCOV')
             product_version: str('^\d+\.\d+\.\d+$', required=False)
+            product_doi: str(required=False)
             composite_release_id: regex(r'\w\d\d\d\d\d', name='CRID', required=False)
-            processing_type: enum('PR', 'UR', required=False)
+            processing_type: enum('PR', 'UR', 'OD', required=False)
             product_accuracy: enum('P', 'M', 'N', 'F', required=False)
             urgent_request_id: list(str(), required=False)
             processing_center: str(required=False)
@@ -95,7 +96,7 @@ runconfig:
 
             dem_interpolation_method: enum('sinc', 'bilinear', 'bicubic', 'nearest', 'biquintic', required=False)
 
-            # Noise correction options (for ISRO)
+            # Noise correction options
             noise_correction: include('noise_correction_options', required=False)
 
         # Group containing CEOS Analysis Ready Data (CARD) parameters
@@ -211,6 +212,7 @@ qa_reports_options:
     histogram:
         decimation_ratio: list(int(min=1), min=2, max=2, required=False)
         backscatter_histogram_bin_edges_range: list(num(), min=2, max=2, required=False)
+        phase_histogram_y_axis_range: list(any(num(), null()), min=2, max=2, required=False)
         phs_in_radians: bool(required=False)
         tile_shape: list(int(min=-1), min=2, max=2, required=False)
 
@@ -237,10 +239,10 @@ dem_download_options:
             y: num(required=False)
 
 pre_process_options:
-    # Number of looks in azimuth
+    # PLACEHOLDER Number of looks in azimuth
     azimuth_looks: int(min=1, required=False)
 
-    # Number of looks in slant range
+    # PLACEHOLDER Number of looks in slant range
     range_looks: int(min=1, required=False)
 
 rtc_options:
@@ -406,7 +408,8 @@ ceos_analysis_ready_data_options:
     # Data access for the output product (URL or DOI)
     product_data_access: str(required=False)
 
-    # Data access for the static layers product associated with the output product (URL or DOI)
+    # Data access for the static layers product associated with the output
+    # product (URL or DOI)
     static_layers_data_access: str(required=False)
 
     # Estimated geometric accuracy (bias and standard deviation)
@@ -421,6 +424,7 @@ noise_correction_options:
     # Enable/disable noise correction
     apply_correction: bool(required=False)
 
+    # PLACEHOLDER
     correction_type: str(required=False)
 
 worker_options:

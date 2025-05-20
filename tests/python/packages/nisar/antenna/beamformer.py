@@ -6,7 +6,7 @@ from nisar.products.readers.Raw import Raw
 from nisar.antenna import TxTrmInfo, RxTrmInfo, TxBMF, RxDBF
 from nisar.antenna.beamformer import get_pulse_index
 from nisar.workflows.focus import make_doppler_lut
-from isce3.focus import make_el_lut
+from isce3.focus import make_los_luts
 from isce3.antenna import ant2rgdop
 
 import isce3
@@ -34,7 +34,7 @@ def amp2deg(amp):
 
 def ref_rxdbf_txbmf_from_ant(ant, orbit, attitude, dem_interp, slant_range,
                              pulse_time_mid, txrx_pol):
-    """Get RX DBF and TX BMF EL-cut paterns from input antenna object to be
+    """Get RX DBF and TX BMF EL-cut patterns from input antenna object to be
     used as references for validation of final averaged beamformed patterns.
 
     These complex beamformed patterns are resampled at mid
@@ -137,7 +137,7 @@ class TestElevationBeamformer:
     el_spacing_min = np.deg2rad(5e-3)  # (rad)
     rg_spacing_min = 52.0  # (m)
 
-    # optional plotting of mag/phs EL patterns for debuging
+    # optional plotting of mag/phs EL patterns for debugging
     plot = False
 
     # absolute tolerances used for phase (deg) and magnitude (dB) errors,
@@ -157,7 +157,7 @@ class TestElevationBeamformer:
     attitude = _raw.getAttitude()
     slant_range = _raw.getRanges(freq_band, txrx_pol[0])
 
-    # pulse time tag used for forming active RX DBF and TX BMF EL paterns
+    # pulse time tag used for forming active RX DBF and TX BMF EL patterns
     # to be generated as either any subset of "pulse_time" or any values
     # within [pule_time[0], pulse_time[-1]].
     pulse_time_out = pulse_time[::3]
@@ -165,8 +165,11 @@ class TestElevationBeamformer:
     # form DEM interpolator object per ref height
     dem_interp = DEMInterpolator(ref_height)
 
+    # Use a smaller azimuth sample spacing to avoid sampling past the end of the
+    # orbit data.
     fc, dop = make_doppler_lut([os.path.join(iscetest.data, sub_dir, l0b_file)],
-                               0, orbit, attitude, dem_interp)
+                               0, orbit, attitude, dem_interp,
+                               azimuth_spacing=0.005)
 
     wavelength = isce3.core.speed_of_light / fc
     rdr2geo_params = dict(
@@ -174,10 +177,10 @@ class TestElevationBeamformer:
         look_min = 0,
         look_max = math.pi / 2,
     )
-    el_lut = make_el_lut(orbit, attitude,
-                         _raw.identification.lookDirection,
-                         dop, wavelength, dem_interp,
-                         rdr2geo_params)
+    el_lut, _, _ = make_los_luts(orbit, attitude,
+                                 _raw.identification.lookDirection,
+                                 dop, wavelength, dem_interp,
+                                 rdr2geo_params)
 
     # Parse Tx-related Cal stuff used only for Tx BMF test cases
     _tx_chanl = _raw.getListOfTxTRMs(freq_band, txrx_pol[0])

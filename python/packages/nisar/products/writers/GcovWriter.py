@@ -50,21 +50,8 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
     rtc_min_value_db = rtc_dict['rtc_min_value_db']
     rtc_upsampling = rtc_dict['dem_upsampling']
 
-    rtc_area_beta_mode = rtc_dict['area_beta_mode']
-    if rtc_area_beta_mode == 'pixel_area':
-        rtc_area_beta_mode_enum = \
-            isce3.geometry.RtcAreaBetaMode.PIXEL_AREA
-    elif rtc_area_beta_mode == 'projection_angle':
-        rtc_area_beta_mode_enum = \
-            isce3.geometry.RtcAreaBetaMode.PROJECTION_ANGLE
-    elif (rtc_area_beta_mode == 'auto' or
-            rtc_area_beta_mode is None):
-        rtc_area_beta_mode_enum = \
-            isce3.geometry.RtcAreaBetaMode.AUTO
-    else:
-        err_msg = ('ERROR invalid area beta mode:'
-                   f' {rtc_area_beta_mode}')
-        raise ValueError(err_msg)
+    rtc_area_beta_mode = \
+        isce3.geometry.normalize_rtc_area_beta_mode(rtc_dict['area_beta_mode'])
 
     # unpack geocode run parameters
     geocode_dict = cfg['processing']['geocode']
@@ -80,20 +67,6 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
         read_and_validate_rtc_anf_flags(geocode_dict, flag_apply_rtc,
                                         output_terrain_radiometry)
     save_mask = geocode_dict['save_mask']
-    save_dem = geocode_dict['save_dem']
-
-    min_block_size_mb = cfg["processing"]["geocode"]['min_block_size']
-    max_block_size_mb = cfg["processing"]["geocode"]['max_block_size']
-
-    # optional keyword arguments , i.e. arguments that may or may not be
-    # included in the call to geocode()
-    optional_geo_kwargs = {}
-
-    # read min/max block size converting MB to B
-    if min_block_size_mb is not None:
-        optional_geo_kwargs['min_block_size'] = min_block_size_mb * (2**20)
-    if max_block_size_mb is not None:
-        optional_geo_kwargs['max_block_size'] = max_block_size_mb * (2**20)
 
     # unpack geo2rdr parameters
     geo2rdr_dict = cfg['processing']['geo2rdr']
@@ -225,28 +198,6 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
         out_geo_rtc_gamma0_to_sigma0_obj = None
 
     # create a NamedTemporaryFile and an ISCE3 Raster object to
-    # temporarily hold the interpolated DEM layer
-    if save_dem:
-        temp_interpolated_dem = tempfile.NamedTemporaryFile(
-            dir=raster_scratch_dir,
-            suffix=secondary_layers_file_extension)
-        if (output_mode ==
-                isce3.geocode.GeocodeOutputMode.AREA_PROJECTION):
-            interpolated_dem_width = geogrid.width + 1
-            interpolated_dem_length = geogrid.length + 1
-        else:
-            interpolated_dem_width = geogrid.width
-            interpolated_dem_length = geogrid.length
-        out_geo_dem_obj = isce3.io.Raster(
-            temp_interpolated_dem.name,
-            interpolated_dem_width,
-            interpolated_dem_length, 1,
-            gdal.GDT_Float32, secondary_layer_files_raster_files_format)
-    else:
-        temp_interpolated_dem = None
-        out_geo_dem_obj = None
-
-    # create a NamedTemporaryFile and an ISCE3 Raster object to
     # temporarily hold the mask layer
     if save_mask:
         temp_mask_file = tempfile.NamedTemporaryFile(
@@ -276,7 +227,7 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
                 out_off_diag_terms=out_off_diag_terms_obj,
                 out_geo_nlooks=out_geo_nlooks_obj,
                 out_geo_rtc=out_geo_rtc_obj,
-                rtc_area_beta_mode=rtc_area_beta_mode_enum,
+                rtc_area_beta_mode=rtc_area_beta_mode,
                 out_geo_rtc_gamma0_to_sigma0=
                     out_geo_rtc_gamma0_to_sigma0_obj,
                 out_mask=out_mask_obj,
@@ -304,9 +255,6 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
     if save_mask:
         out_mask_obj.close_dataset()
         del out_mask_obj
-
-    if save_dem:
-        del out_geo_dem_obj
 
     if flag_fullcovariance:
         # out_off_diag_terms_obj.close_dataset()
@@ -353,6 +301,7 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
                      hdf5_obj, root_ds,
                      yds, xds,
                      'mask',
+                     fill_value=255,
                      compute_stats=False)
 
     # save rtc
@@ -368,36 +317,6 @@ def run_geocode_cov(cfg, hdf5_obj, root_ds,
                      hdf5_obj, root_ds,
                      yds, xds,
                      'rtcGammaToSigmaFactor',
-                     **output_secondary_layers_kwargs)
-
-    # save interpolated DEM
-    if save_dem:
-
-        '''
-        The DEM is interpolated over the geogrid pixels vertices
-        rather than the pixels centers.
-        '''
-        if (output_mode ==
-                isce3.geocode.GeocodeOutputMode.AREA_PROJECTION):
-            dem_geogrid = isce3.product.GeoGridParameters(
-                start_x=geogrid.start_x - geogrid.spacing_x / 2,
-                start_y=geogrid.start_y - geogrid.spacing_y / 2,
-                spacing_x=geogrid.spacing_x,
-                spacing_y=geogrid.spacing_y,
-                width=int(geogrid.width) + 1,
-                length=int(geogrid.length) + 1,
-                epsg=geogrid.epsg)
-            yds_dem, xds_dem = \
-                set_get_geo_info(hdf5_obj, root_ds, dem_geogrid)
-        else:
-            yds_dem = yds
-            xds_dem = xds
-
-        save_dataset(temp_interpolated_dem.name, hdf5_obj,
-                     root_ds, yds_dem, xds_dem,
-                     'interpolatedDem',
-                     long_name='Interpolated DEM',
-                     units='1',
                      **output_secondary_layers_kwargs)
 
     # save GCOV off-diagonal elements
@@ -555,10 +474,10 @@ class GcovWriter(BaseL2WriterSingleInput):
             'Normalised Radar Backscatter (NRB)')
 
         self.set_value(
-            'metadata/ceosAnalysisReadyData/'
+            '{PRODUCT}/metadata/ceosAnalysisReadyData/'
             'outputBackscatterDecibelConversionFormula',
             '10*log10(<GCOV_TERM>)')
- 
+
     def populate_data_parameters(self):
         """
         Populate the data group `grids` of the GCOV product
@@ -584,9 +503,9 @@ class GcovWriter(BaseL2WriterSingleInput):
         parameters_group = \
             '{PRODUCT}/metadata/processingInformation/parameters'
 
-        self.set_value(
+        self.copy_from_runconfig(
             f'{parameters_group}/noiseCorrectionApplied',
-            False)
+            'processing/noise_correction/apply_correction')
 
         self.set_value(
             f'{parameters_group}/preprocessingMultilookingApplied',
@@ -635,9 +554,10 @@ class GcovWriter(BaseL2WriterSingleInput):
             f'{parameters_group}/validSamplesSubSwathMaskingApplied',
             'processing/geocode/apply_valid_samples_sub_swath_masking')
 
-        self.copy_from_runconfig(
+        # Shadow masking has not been implemented yet, so it's always `False`
+        self.set_value(
             f'{parameters_group}/shadowMaskingApplied',
-            'processing/geocode/apply_shadow_masking')
+            False)
 
         self.copy_from_runconfig(
             f'{parameters_group}/polarimetricSymmetrizationApplied',

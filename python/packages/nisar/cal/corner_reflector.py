@@ -161,17 +161,17 @@ def parse_corner_reflector_csv(csvfile: str | os.PathLike) -> Iterator[CornerRef
     dtype = np.dtype(
         [
             ("id", np.object_),
-            ("lat", np.float_),
-            ("lon", np.float_),
-            ("height", np.float_),
-            ("az", np.float_),
-            ("el", np.float_),
-            ("side_length", np.float_),
+            ("lat", np.float64),
+            ("lon", np.float64),
+            ("height", np.float64),
+            ("az", np.float64),
+            ("el", np.float64),
+            ("side_length", np.float64),
             ("survey_date", np.object_),
             ("validity", np.int_),
-            ("vel_e", np.float_),
-            ("vel_n", np.float_),
-            ("vel_u", np.float_),
+            ("vel_e", np.float64),
+            ("vel_n", np.float64),
+            ("vel_u", np.float64),
         ]
     )
 
@@ -401,7 +401,7 @@ def filter_crs_per_az_heading(crs, az_heading, az_atol=np.deg2rad(20.0)):
     az_heading : float
         Desired AZ/heading angle in radians w.r.t. geographic North.
     az_atol : float, default=20.0 degrees
-        Absolute tolerance in radians when comapring AZ of CRs with
+        Absolute tolerance in radians when comparing AZ of CRs with
         `az_heading`. The default is around 0.5 * HBPW of an ideal
         triangular trihedral CR (HPBW ~ 40 deg).
 

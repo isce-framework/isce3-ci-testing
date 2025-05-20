@@ -1,7 +1,7 @@
 '''
 collection of useful functions used across workflows
 '''
-
+from __future__ import annotations
 import datetime
 import os
 import pathlib
@@ -18,6 +18,7 @@ from isce3.product import RadarGridParameters
 from nisar.products.readers import SLC
 from nisar.workflows.get_product_geometry import \
     get_geolocation_grid as compute_geogrid_geometry
+from nisar.workflows.h5_prep import get_off_params
 from osgeo import gdal, gdal_array
 from pathlib import Path
 
@@ -91,6 +92,66 @@ def slice_gen(n_smp: int, n_smp_blk: int) -> slice:
         i_start = n * n_smp_blk
         i_stop = min(n_smp, i_start + n_smp_blk)
         yield slice(i_start, i_stop)
+
+
+def copols_or_desired_pols_from_raw(
+        raw: 'nisar.products.readers.Raw',
+        freq_band: str | None = None,
+        txrx_pol:str | None = None
+        ) -> dict[str, list[str]]:
+    """
+    Get list of transmit-receive polarization names of either all co-pol
+    datasets (default) or requested ones from Raw which fulfill either
+    parameter `freq_band` and/or `txrx_pol` if provided.
+
+    The output is in the form of a dict with key=frequency_band and
+    value=list of txrx_pols.
+
+    Parameters
+    ----------
+    raw : nisar.products.readers.Raw
+        Raw parser of L0B product.
+    freq_band : str, optional
+        Frequency band character "A" or "B".
+        If None will cover all available bands in `raw`.
+    txrx_pol : str, optional
+        Transmit-receive polarization. If None will cover all
+        co-pol products under `freq_band`.
+
+    Returns
+    -------
+    dict
+        A dictionary with `freq_band` as keys and list of `txrx_pol`
+        as values.
+
+    """
+    # get list of frequency bands
+    if freq_band is None:
+        freqs = list(raw.polarizations)
+    else:
+        # go with desired frequency band
+        if freq_band not in raw.polarizations:
+            raise ValueError('Wrong frequency band! The available bands -> '
+                             f'{list(raw.polarizations)}')
+        freqs = [freq_band]
+
+    frq_pol = dict()
+    for frq in freqs:
+        pols = raw.polarizations[frq]
+        if txrx_pol is None:
+            # get all co-pols if pol is not provided
+            co_pols = [pol for pol in pols if (pol[0] == pol[1] or
+                                               pol[0] in ['L', 'R'])]
+            if co_pols:
+                frq_pol[frq] = co_pols
+        else:
+            # get all pols over all bands that match the desired one
+            if txrx_pol in pols:
+                frq_pol[frq] = [txrx_pol]
+    # check if the dict empty (it simply occurs if txrx_pol is provided!)
+    if not frq_pol:
+        raise ValueError(f'Wrong TxRx Pol over frequency bands {freqs}!')
+    return frq_pol
 
 
 def deep_update(original, update, flag_none_is_valid=True):
@@ -218,7 +279,7 @@ def check_radargrid_orbit_tec(radar_grid, orbit, tec_path):
     if not tec_path:
         info_channel.log('IMAGEN TEC was not provided. '
                          'Checking the orbit data and sensing start / stop.')
-        
+
         info_channel.log(margin_info_msg)
 
         if orbit_margin_start < 0.0:
@@ -509,6 +570,165 @@ def complex_raster_path_from_h5(slc, freq, pol, hdf5_path, lines_per_block,
         file_path = hdf5_path
 
     return raster_path, file_path
+
+def get_pixel_offsets_params(cfg : dict):
+    """
+    Get the pixel offsets parameters from the runconfig dictionary
+
+    Parameters
+    ----------
+    cfg : dict
+        InSAR runconfig dictionray
+
+    Returns
+    ----------
+    is_roff : boolean
+        Offset product or not
+    margin : int
+        Margin
+    rg_start : int
+        Start range
+    az_start : int
+        Start azimuth
+    rg_skip : int
+        Pixels skipped across range
+    az_skip : int
+        Pixels skipped across the azimth
+    rg_search : int
+        Window size across range
+    az_search : int
+        Window size across azimuth
+    rg_chip : int
+        Fine window size across range
+    az_chip : int
+        Fine window size across azimuth
+    ovs_factor : int
+        Oversampling factor
+    """
+    proc_cfg = cfg["processing"]
+
+    # pull the offset parameters
+    is_roff = proc_cfg["offsets_product"]["enabled"]
+    (margin, rg_gross, az_gross,
+        rg_start, az_start,
+        rg_skip, az_skip, ovs_factor) = \
+            [get_off_params(proc_cfg, param, is_roff)
+            for param in ["margin", "gross_offset_range",
+                        "gross_offset_azimuth",
+                        "start_pixel_range","start_pixel_azimuth",
+                        "skip_range", "skip_azimuth",
+                        "correlation_surface_oversampling_factor"]]
+
+    rg_search, az_search, rg_chip, az_chip = \
+        [get_off_params(proc_cfg, param, is_roff,
+                        pattern="layer",
+                        get_min=True,) for param in \
+                            ["half_search_range",
+                                "half_search_azimuth",
+                                "window_range",
+                                "window_azimuth"]]
+    # Adjust margin
+    margin = max(margin, np.abs(rg_gross), np.abs(az_gross))
+
+    # Compute slant range/azimuth vectors of offset grids
+    if rg_start is None:
+        rg_start = margin + rg_search
+    if az_start is None:
+        az_start = margin + az_search
+
+    return (is_roff,  margin, rg_start, az_start,
+            rg_skip, az_skip, rg_search, az_search,
+            rg_chip, az_chip, ovs_factor)
+
+def get_pixel_offsets_dataset_shape(cfg : dict, freq : str):
+    """
+    Get the pixel offsets dataset shape at a given frequency
+
+    Parameters
+    ---------
+    cfg : dict
+        InSAR runconfig dictionary
+    freq: str
+        frequency ('A' or 'B')
+
+    Returns
+    ----------
+    tuple
+        (off_length, off_width):
+    """
+    proc_cfg = cfg["processing"]
+    is_roff,  margin, _, _,\
+    rg_skip, az_skip, rg_search, az_search,\
+    rg_chip, az_chip, _ = get_pixel_offsets_params(cfg)
+
+    ref_h5_slc_file = cfg["input_file_group"]["reference_rslc_file"]
+    ref_rslc = SLC(hdf5file=ref_h5_slc_file)
+
+    radar_grid = ref_rslc.getRadarGrid(freq)
+    slc_lines, slc_cols = (radar_grid.length, radar_grid.width)
+
+    off_length = get_off_params(proc_cfg, "offset_length", is_roff)
+    off_width = get_off_params(proc_cfg, "offset_width", is_roff)
+    if off_length is None:
+        margin_az = 2 * margin + 2 * az_search + az_chip
+        off_length = (slc_lines - margin_az) // az_skip
+    if off_width is None:
+        margin_rg = 2 * margin + 2 * rg_search + rg_chip
+        off_width = (slc_cols - margin_rg) // rg_skip
+
+    # shape of offset product
+    return (off_length, off_width)
+
+def get_offset_radar_grid(cfg, radar_grid_slc):
+    ''' Create radar grid object for offset datasets
+
+    Parameters
+    ----------
+    cfg : dict
+        Dictionary containing processing parameters
+    radar_grid_slc : SLC
+        Object containing SLC properties
+    '''
+    proc_cfg = cfg["processing"]
+    is_roff,  margin, rg_start, az_start,\
+    rg_skip, az_skip, rg_search, az_search,\
+    rg_chip, az_chip, _ = get_pixel_offsets_params(cfg)
+
+    slc_lines, slc_cols = (radar_grid_slc.length, radar_grid_slc.width)
+
+    off_length = get_off_params(proc_cfg, "offset_length", is_roff)
+    off_width = get_off_params(proc_cfg, "offset_width", is_roff)
+
+    if off_length is None:
+        margin_az = 2 * margin + 2 * az_search + az_chip
+        off_length = (slc_lines - margin_az) // az_skip
+    if off_width is None:
+        margin_rg = 2 * margin + 2 * rg_search + rg_chip
+        off_width = (slc_cols - margin_rg) // rg_skip
+
+    # the starting range/sensing start of the pixel offsets radar grid
+    # to be at the center of the matching window
+    offset_starting_range = radar_grid_slc.starting_range + \
+                            (rg_start + rg_chip//2)\
+                            * radar_grid_slc.range_pixel_spacing
+    offset_sensing_start = radar_grid_slc.sensing_start + \
+                           (az_start + az_chip//2)\
+                           / radar_grid_slc.prf
+    # Range spacing for offsets
+    offset_range_spacing = radar_grid_slc.range_pixel_spacing * rg_skip
+    offset_prf = radar_grid_slc.prf / az_skip
+
+    # Create offset radar grid
+    radar_grid = isce3.product.RadarGridParameters(offset_sensing_start,
+                                                   radar_grid_slc.wavelength,
+                                                   offset_prf,
+                                                   offset_starting_range,
+                                                   offset_range_spacing,
+                                                   radar_grid_slc.lookside,
+                                                   off_length,
+                                                   off_width,
+                                                   radar_grid_slc.ref_epoch)
+    return radar_grid
 
 
 def get_cfg_freq_pols(cfg):

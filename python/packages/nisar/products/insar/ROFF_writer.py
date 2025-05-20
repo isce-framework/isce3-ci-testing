@@ -1,6 +1,8 @@
 import numpy as np
 from nisar.workflows.h5_prep import get_off_params
-from nisar.workflows.helpers import get_cfg_freq_pols
+from nisar.workflows.helpers import (get_cfg_freq_pols,
+                                     get_pixel_offsets_dataset_shape,
+                                     get_pixel_offsets_params)
 
 from .dataset_params import DatasetParams, add_dataset_and_attrs
 from .InSAR_base_writer import InSARBaseWriter
@@ -9,7 +11,6 @@ from .InSAR_L1_writer import L1InSARWriter
 from .InSAR_products_info import InSARProductsInfo
 from .product_paths import ROFFGroupsPaths
 from .units import Units
-from .utils import get_pixel_offsets_dataset_shape, get_pixel_offsets_params
 
 
 class ROFFWriter(L1InSARWriter):
@@ -40,6 +41,7 @@ class ROFFWriter(L1InSARWriter):
         """
         super().add_root_attrs()
 
+        # Add additional attributes
         self.attrs["title"] = np.bytes_("NISAR L1 ROFF Product")
         self.attrs["reference_document"] = \
             np.bytes_("D-105009 NISAR NASA SDS"
@@ -47,7 +49,7 @@ class ROFFWriter(L1InSARWriter):
 
     def add_coregistration_to_algo_group(self):
         """
-        Add the coregistration parameters to the "processingInfromation/algorithms" group
+        Add the coregistration parameters to the "processingInformation/algorithms" group
         """
         proc_cfg = self.cfg["processing"]
         dense_offsets = proc_cfg["dense_offsets"]["enabled"]
@@ -83,7 +85,7 @@ class ROFFWriter(L1InSARWriter):
 
     def add_cross_correlation_to_algo_group(self):
         """
-        Add the cross correlation parameters to the "processingInfromation/algorithms" group
+        Add the cross correlation parameters to the "processingInformation/algorithms" group
         """
         proc_cfg = self.cfg["processing"]
         is_roff = proc_cfg["offsets_product"]["enabled"]

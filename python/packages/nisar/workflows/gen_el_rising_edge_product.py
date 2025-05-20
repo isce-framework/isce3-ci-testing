@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate El rising edge product from either DBFed SwwepSAR L0B (science mode)
-or a single-channel SAR over homogenous scene plus Antenna HDF5 plus
+or a single-channel SAR over homogeneous scene plus Antenna HDF5 plus
 [DEM raster]. The output will be used for pointing analyses by D&C team.
 The product spec is the same as that of `el_null_range`.
 """
@@ -19,8 +19,7 @@ from nisar.pointing import el_rising_edge_from_raw_ant
 from nisar.log import set_logger
 from nisar.products.readers.orbit import load_orbit_from_xml
 from nisar.products.readers.attitude import load_attitude_from_xml
-from nisar.workflows.gen_el_null_range_product import (
-    copol_or_desired_product_from_raw)
+from nisar.workflows.helpers import copols_or_desired_pols_from_raw
 
 
 def cmd_line_parser():
@@ -46,7 +45,7 @@ def cmd_line_parser():
                      help='Filename of HDF5 L0B science product')
     prs.add_argument('--ant', type=str, required=True, dest='antenna_file',
                      help='Filename of HDF5 Antenna product')
-    prs.add_argument('-b', '--beam_num', type=int, default=1, dest='beam_num',
+    prs.add_argument('-b', '--beam_num', type=int, dest='beam_num',
                      help='Beam number to pick the antenna pattern from the'
                      ' antenna HDF5 file. This is only used for single-channel'
                      ' SAR (not multi-channel DBFed SweepSAR!)')
@@ -79,11 +78,11 @@ def cmd_line_parser():
                      'file. The attitude data will be used in place of those '
                      'in L0B. Default is attitude data stored in L0B.')
     prs.add_argument('-a', '--az_block_dur', type=float, dest='az_block_dur',
-                     default=3.0, help='Duration of azimuth block in seconds.'
+                     default=5.0, help='Duration of azimuth block in seconds.'
                      ' This value will be limited by total azimuth duration.'
                      ' The value must be equal or larger than the mean PRI.')
     prs.add_argument('-o', '--out', type=str, dest='out_path', default='.',
-                     help='Output directory to dump PNG files if `--plot` and'
+                     help='Output directory to dump PNG files if `--plot` and '
                      'the EL rising-edge product. The product is CSV file '
                      'whose name conforms to JPL D-104976.')
     prs.add_argument('--no_dbf_norm', action='store_true',
@@ -165,7 +164,7 @@ def gen_el_rising_edge_product(args):
 
     # logic for frequency band and TxRx polarization choices.
     # form a new dict "frq_pol" with key=freq_band and value=[txrx_pol]
-    frq_pol = copol_or_desired_product_from_raw(
+    frq_pol = copols_or_desired_pols_from_raw(
         raw, freq_band=args.freq_band, txrx_pol=args.txrx_pol)
     logger.info(f'List of selected frequency bands and TxRx Pols -> {frq_pol}')
 
@@ -178,6 +177,12 @@ def gen_el_rising_edge_product(args):
     # polarizations
     for freq_band in frq_pol:
         for txrx_pol in frq_pol[freq_band]:
+            # check if the product is so-called noise-only (NO TX).
+            # If no TX then skip that product.
+            if raw.is_tx_off(freq_band, txrx_pol):
+                logger.warning(
+                    f'Skip no-TX product ({freq_band},{txrx_pol})!')
+                continue
             # EL rising edge process
             (el_ofs, az_dtm, el_fl, sr_fl, lka_fl, msk, cvg, pf_echo,
              pf_ant, pf_wgt) = el_rising_edge_from_raw_ant(

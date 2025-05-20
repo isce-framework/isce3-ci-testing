@@ -7,9 +7,11 @@ isce3/cal/point_target_info.py
 isce3/cal/radar_cross_section.py
 isce3/core/gpu_check.py
 isce3/core/llh.py
+isce3/core/orbit.py
 isce3/core/poly2d.py
 isce3/core/resample_block_generators.py
 isce3/focus/valid_regions.py
+isce3/focus/notch.py
 isce3/geocode/geocode_slc.py
 isce3/geometry/polygons.py
 isce3/image/resample_slc.py
@@ -41,7 +43,9 @@ nisar/products/readers/GSLC.py
 nisar/products/readers/instrument_parser.py
 nisar/products/readers/orbit.py
 nisar/products/readers/raw.py
+nisar/products/readers/rslc.py
 nisar/products/readers/rslc_cal.py
+nisar/products/product_spec.py
 nisar/workflows/crossmul.py
 nisar/workflows/estimate_abscal_factor.py
 nisar/workflows/faraday_rot_angle_from_rslc.py
@@ -61,6 +65,7 @@ nisar/workflows/filter_interferogram.py
 nisar/workflows/bandpass_insar.py
 nisar/workflows/ionosphere.py
 nisar/workflows/troposphere.py
+nisar/workflows/solid_earth_tides.py
 nisar/workflows/baseline.py
 nisar/workflows/process_args.py
 nisar/workflows/rdr2geo.py

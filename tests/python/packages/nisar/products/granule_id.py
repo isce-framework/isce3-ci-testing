@@ -73,7 +73,7 @@ def test_rslc(raw_filename, frame_wkt, expected_granule_id):
     partial_granule_id = ("NISAR_L1_PR_RSLC_001_001_A_004_{MODE}_{POLE}_A"
         "_{StartDateTime}_{EndDateTime}_D00340_P_{C}_J_001")
 
-    granule_id = fill_partial_granule_id(partial_granule_id, mode, t0, t1,
+    granule_id, _, _ = fill_partial_granule_id(partial_granule_id, mode, t0, t1,
         frame_polygon, image_polygon)
 
     assert granule_id == expected_granule_id

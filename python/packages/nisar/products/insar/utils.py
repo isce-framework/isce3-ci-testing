@@ -1,4 +1,3 @@
-
 import re
 from datetime import datetime
 from typing import Optional
@@ -8,7 +7,6 @@ import numpy as np
 from isce3.core import crop_external_orbit
 from nisar.products.readers import SLC
 from nisar.products.readers.orbit import load_orbit_from_xml
-from nisar.workflows.h5_prep import get_off_params
 from osgeo import gdal
 
 
@@ -314,114 +312,6 @@ def get_unwrapped_interferogram_dataset_shape(cfg : dict, freq : str):
 
     return igram_shape
 
-def get_pixel_offsets_params(cfg : dict):
-    """
-    Get the pixel offsets parameters from the runconfig dictionary
-
-    Parameters
-    ----------
-    cfg : dict
-        InSAR runconfig dictionray
-
-    Returns
-    ----------
-    is_roff : boolean
-        Offset product or not
-    margin : int
-        Margin
-    rg_start : int
-        Start range
-    az_start : int
-        Start azimuth
-    rg_skip : int
-        Pixels skiped across range
-    az_skip : int
-        Pixels skiped across the azimth
-    rg_search : int
-        Window size across range
-    az_search : int
-        Window size across azimuth
-    rg_chip : int
-        Fine window size across range
-    az_chip : int
-        Fine window size across azimuth
-    ovs_factor : int
-        Oversampling factor
-    """
-    proc_cfg = cfg["processing"]
-
-    # pull the offset parameters
-    is_roff = proc_cfg["offsets_product"]["enabled"]
-    (margin, rg_gross, az_gross,
-        rg_start, az_start,
-        rg_skip, az_skip, ovs_factor) = \
-            [get_off_params(proc_cfg, param, is_roff)
-            for param in ["margin", "gross_offset_range",
-                        "gross_offset_azimuth",
-                        "start_pixel_range","start_pixel_azimuth",
-                        "skip_range", "skip_azimuth",
-                        "correlation_surface_oversampling_factor"]]
-
-    rg_search, az_search, rg_chip, az_chip = \
-        [get_off_params(proc_cfg, param, is_roff,
-                        pattern="layer",
-                        get_min=True,) for param in \
-                            ["half_search_range",
-                                "half_search_azimuth",
-                                "window_range",
-                                "window_azimuth"]]
-    # Adjust margin
-    margin = max(margin, np.abs(rg_gross), np.abs(az_gross))
-
-    # Compute slant range/azimuth vectors of offset grids
-    if rg_start is None:
-        rg_start = margin + rg_search
-    if az_start is None:
-        az_start = margin + az_search
-
-    return (is_roff,  margin, rg_start, az_start,
-            rg_skip, az_skip, rg_search, az_search,
-            rg_chip, az_chip, ovs_factor)
-
-def get_pixel_offsets_dataset_shape(cfg : dict, freq : str):
-    """
-    Get the pixel offsets dataset shape at a given frequency
-
-    Parameters
-    ---------
-    cfg : dict
-        InSAR runconfig dictionary
-    freq: str
-        frequency ('A' or 'B')
-
-    Returns
-    ----------
-    tuple
-        (off_length, off_width):
-    """
-    proc_cfg = cfg["processing"]
-    is_roff,  margin, _, _,\
-    rg_skip, az_skip, rg_search, az_search,\
-    rg_chip, az_chip, _ = get_pixel_offsets_params(cfg)
-
-    ref_h5_slc_file = cfg["input_file_group"]["reference_rslc_file"]
-    ref_rslc = SLC(hdf5file=ref_h5_slc_file)
-
-    radar_grid = ref_rslc.getRadarGrid(freq)
-    slc_lines, slc_cols = (radar_grid.length, radar_grid.width)
-
-    off_length = get_off_params(proc_cfg, "offset_length", is_roff)
-    off_width = get_off_params(proc_cfg, "offset_width", is_roff)
-    if off_length is None:
-        margin_az = 2 * margin + 2 * az_search + az_chip
-        off_length = (slc_lines - margin_az) // az_skip
-    if off_width is None:
-        margin_rg = 2 * margin + 2 * rg_search + rg_chip
-        off_width = (slc_cols - margin_rg) // rg_skip
-
-    # shape of offset product
-    return (off_length, off_width)
-
 def _compute_subswath_mask_id(azi_idx,
                               range_idx,
                               azi_offset,
@@ -527,26 +417,33 @@ def generate_insar_subswath_mask(ref_rslc_obj,
     azimuth_offset_band = src_azimuth_offset.GetRasterBand(1)
 
     subswath_mask = []
-
     for i in azi_idx_arr:
-        range_off = \
-            range_offset_band.ReadAsArray(0,
-                                          int(i),
-                                          ref_swath.samples,
-                                          1)
-        azimuth_off = \
-            azimuth_offset_band.ReadAsArray(0,
+        # Check if the azimuth index is within the radar grid
+        if i >= 0 and i < ref_swath.lines:
+            range_off = \
+                range_offset_band.ReadAsArray(0,
                                             int(i),
                                             ref_swath.samples,
                                             1)
-        for j in rg_idx_arr:
-            subswath_mask.append(
-                _compute_subswath_mask_id(int(i),int(j),
-                                          azimuth_off[0,int(j)],
-                                          range_off[0,int(j)],
-                                          ref_subswaths,
-                                          sec_subswaths)
-                )
+            azimuth_off = \
+                azimuth_offset_band.ReadAsArray(0,
+                                                int(i),
+                                                ref_swath.samples,
+                                                1)
+            for j in rg_idx_arr:
+                # Initialize the subswath mask id to be 0
+                subswath_mask_id = 0
+                # Check if the range index is within the swath
+                if j >= 0 and j < ref_swath.samples:
+                    subswath_mask_id =  _compute_subswath_mask_id(int(i),int(j),
+                                            azimuth_off[0,int(j)],
+                                            range_off[0,int(j)],
+                                            ref_subswaths,
+                                            sec_subswaths)
+                subswath_mask.append(subswath_mask_id)
+        # The azimuth index is not in the radar grid meaning no subswath mask
+        else:
+            subswath_mask += [0] * len(rg_idx_arr)
 
     return np.array(subswath_mask).reshape(
         (len(azi_idx_arr),

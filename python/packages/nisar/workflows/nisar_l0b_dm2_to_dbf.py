@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 import os
 import time
+import tempfile
 
 import numpy as np
 import h5py
@@ -22,14 +23,14 @@ from isce3.geometry import DEMInterpolator
 from isce3.io import Raster
 from nisar.log import set_logger
 from isce3.signal import dbf_onetap_from_dm2, dbf_onetap_from_dm2_seamless
-from isce3.focus import fill_gaps
+from isce3.focus import fill_gaps, form_linear_chirp
 from nisar.workflows.helpers import build_uniform_quantizer_lut_l0b, slice_gen
 
 
 def copy_swath_except_echo_h5(fid_in, fid_out, swath_path, frq_pol):
     """
     Copy all groups and datasets under swath from input HDF5 to output
-    HDF5 excpet for echo products.
+    HDF5 except for echo products.
 
     Parameters
     ----------
@@ -158,7 +159,8 @@ def cmd_line_parser():
                      )
     prs.add_argument('-o', '--out-path', type=str, default='.',
                      dest='out_path',
-                     help=('Output path for PNG plots if `--plot`')
+                     help=('Output path for temporary files and '
+                           'PNG plots if `--plot`')
                      )
     prs.add_argument('-p', '--product-name', type=str, dest='prod_name',
                      help=('Product science L0B HDF5 file and path name. '
@@ -184,7 +186,7 @@ def cmd_line_parser():
     prs.add_argument('--plot', action='store_true', dest='plot',
                      help='Plot one-tap DBFed echo ratser for each AZ block.')
     prs.add_argument('-m', '--multiplier', type=float, dest='multiplier',
-                     help='DBFed echo multipler prior to quantization.')
+                     help='DBFed echo multiplier prior to quantization.')
     prs.add_argument('-w', '--win-ped', type=float, dest='win_ped', default=1,
                      help=('Raised-cosine window pedestal used in '
                            'range comp. A value within [0, 1].')
@@ -202,6 +204,24 @@ def cmd_line_parser():
                            'Must be the same as number of RX channels. If '
                            'provided, will be used in place of inverse of '
                            'caltones!')
+                     )
+    prs.add_argument('--sample-delays', type=int, nargs='*',
+                     help=('Relative integer sample delays of RX channels '
+                           'wrt the first one in ascending RX order for '
+                           'either the selected frequency band ("A" or "B") '
+                           'or the very first of two ("A") if split spectrum. '
+                           'The number of delays shall be equal to the total '
+                           'number of RX channels minus one, excluding the '
+                           'very first channel.')
+                     )
+    prs.add_argument('--sample-delays2', type=int, nargs='*',
+                     help=('Relative integer sample delays of RX channels '
+                           'wrt the first one in ascending RX order for '
+                           'the second frequency band ("B") if split spectrum '
+                           'and both bands are processed. The number of '
+                           'delays shall be equal to the total number of RX '
+                           'channels minus one, excluding the very first '
+                           'channel.')
                      )
     return prs.parse_args()
 
@@ -244,8 +264,8 @@ def nisar_l0b_dm2_to_dbf(args):
     txrx_pol = frq_pol[freq_band][0]
 
     # check the RX calibration status
-    amp_cal = args.amp_cal
     if args.calib:
+        amp_cal = args.amp_cal
         if amp_cal is not None:
             use_caltone = False
             # check number of RX channels match "amp_cal"
@@ -263,9 +283,31 @@ def nisar_l0b_dm2_to_dbf(args):
             use_caltone = True
             logger.info('Apply RX calibration based on inverse of slow-time'
                         ' averaged complex caltones!')
+    else:  # No calibration, set cal amplitude to None!
+        amp_cal = None
     # get ref epoch and build AZ slice generator
     epoch, azt_raw = raw.getPulseTimes(freq_band, txrx_pol[0])
     n_rgl_tot = azt_raw.size
+
+    # check the size of the sample delays and reverse the sign
+    dset = raw.getRawDataset(freq_band, txrx_pol)
+    size_delay = dset.shape[0] - 1
+    sample_delays_all = [args.sample_delays, args.sample_delays2]
+    for nn, (sample_delays, name_delay) in enumerate(
+        zip(sample_delays_all, ["sample-delays", "sample-delays2"])
+    ):
+        if sample_delays is not None:
+            if len(sample_delays) != size_delay:
+                raise ValueError(
+                    f'Size of "{name_delay}"={len(sample_delays)} must '
+                    f'be {size_delay}!'
+                )
+            # reverse the sign for compensation of delays
+            sample_delays_all[nn] = - np.asarray(sample_delays)
+            logger.info(
+                f'The amount of delay correction wrt RX # 1 for {name_delay} '
+                f'-> {sample_delays_all[nn]}'
+            )
 
     # parse orbit and attitude and check epoch
     if args.orbit_file is None:
@@ -344,7 +386,7 @@ def nisar_l0b_dm2_to_dbf(args):
     rgl_slices = list(slice_gen(n_rgl_tot, args.num_rgl))
     logger.info(f'Number of AZ blocks -> {len(rgl_slices)}')
 
-    for freq_band in frq_pol:
+    for freq_band, sample_delays in zip(frq_pol, sample_delays_all):
         # group path for frequency band
         band_path = raw.BandPath(freq_band) + '/'
 
@@ -359,7 +401,7 @@ def nisar_l0b_dm2_to_dbf(args):
                     # AZ blocks to avoid introducing any undesired slow-time
                     # variation affecting AZ impulse response.
                     # Generally speaking, caltone should stay stable at least
-                    # within a minute data aquisition!
+                    # within a minute data acquisition!
                     caltones = raw.getCaltone(freq_band, txrx_pol)
                     cal_avg = caltones.mean(axis=0)
                     logger.info(f'Averaged Caltones -> {cal_avg}')
@@ -413,34 +455,54 @@ def nisar_l0b_dm2_to_dbf(args):
             # due to non-mitigated strong TX Cal loop-back chirps.
             sbsw = raw.getSubSwaths(freq_band, txrx_pol[0])
 
+            # create a temp file for memmap of multi-channel complex
+            # decoded echo to avoid possible memory allocation issue
+            fid_tmp = tempfile.NamedTemporaryFile(
+                suffix=f'_dm2_freq{freq_band}_pol{txrx_pol}.c8',
+                dir=out_path)
+            # form a numpy 3-D memmap AZ block shared by all AZ blocks
+            num_rgl = rgl_slices[0].stop - rgl_slices[0].start
+            dset_azblk = np.memmap(
+                fid_tmp, mode='w+',
+                shape=(num_chanl, num_rgl, sr.size),
+                dtype=dset.dtype)
             # loop over AZ blocks
             for n_blk, rgl_slice in enumerate(rgl_slices, start=1):
                 logger.info(f'Processing AZ block # {n_blk} ...')
-
+                num_rgl = rgl_slice.stop - rgl_slice.start
+                # fill in 3-D memmap complex array with decoded echo,
+                # one channel at a time to avoid memory issue!
+                for cc in range(num_chanl):
+                    dset_azblk[cc, :num_rgl] = dset[cc, rgl_slice, :]
                 # fill in TX gap regions with zeros in place
-                dset_azblk = dset[:, rgl_slice, :]
-                fill_gaps(dset_azblk, sbsw[:, rgl_slice])
+                fill_gaps(dset_azblk[:, :num_rgl], sbsw[:, rgl_slice])
+
+                # Adjust the relative integer sample delays in place
+                # over all channels within an AZ block
+                _adjust_delays_in_place(dset_azblk[:, :num_rgl], sample_delays)
 
                 # mid AZ time at the center of the AZ block
                 azt_mid = azt_raw[rgl_slice].mean()
 
-                if args.no_rgcomp:  # simply peform mosaicking
+                if args.no_rgcomp:  # simply perform mosaicking
                     echo_dbf = dbf_onetap_from_dm2(
-                        dset_azblk, azt_mid, el_trans, az_trans,
+                        dset_azblk[:, :num_rgl], azt_mid, el_trans, az_trans,
                         sr, orbit, attitude, dem, cal_coefs=amp_cal
                     )
                 else:  # perform range conv and deconv while mosaicking
                     logger.info('Perform range convolution and deconvolution!')
-                    chirp_ref = raw.getChirp(freq_band, txrx_pol[0])
+                    # For NISAR modes with zero bandwidth (no TX), the chirp
+                    # slope is assumed to be `-fs / (1.2 * pw)`.
+                    fs, slope, pw = _get_chirp_parameters(
+                        raw, freq_band, txrx_pol[0])
+                    chirp_ref = np.asarray(form_linear_chirp(slope, pw, fs))
                     echo_dbf = dbf_onetap_from_dm2_seamless(
-                        dset_azblk, chirp_ref, azt_mid, el_trans,
+                        dset_azblk[:, :num_rgl], chirp_ref, azt_mid, el_trans,
                         az_trans, sr, orbit, attitude, dem, n_cpu,
                         ped_win=args.win_ped, cal_coefs=amp_cal)
                     # scale echo by sqrt(BW * PW) to remove compression gain
-                    # and to preserve input dynamic range.
-                    _, _, rate, pw = raw.getChirpParameters(
-                        freq_band, txrx_pol[0])
-                    scalar_cg = np.sqrt(abs(rate) * pw ** 2)
+                    # and to preserve input dynamic range
+                    scalar_cg = np.sqrt(abs(slope) * pw ** 2)
                     logger.info('Remove compression amp gain (linear)'
                                 f' -> {scalar_cg}.')
                     echo_dbf /= scalar_cg
@@ -482,11 +544,81 @@ def nisar_l0b_dm2_to_dbf(args):
                 dset_prod_out.write_direct(echo_dbf.astype(
                     'uint16').view(dset.dtype_storage), dest_sel=rgl_slice)
 
+            # destroy memmap and close the temp file
+            del dset_azblk, fid_tmp
+
     # close in/out HDF5 files
     fid_in.close()
     fid_out.close()
 
     logger.info(f'Elapsed time (sec) -> {time.time() - tic:.1f}')
+
+
+def _get_chirp_parameters(raw, freq_band, txrx_pol, slope_sign=-1):
+    """
+    Get baseband chirp parameters from Raw for a desired
+    frequency band and polarization.
+
+    This function extracts chirp parameters from the input L0B product when
+    possible. However, in the case of a no-transmit (noise-only) channel, the
+    chirp slope parameter in the product metadata will be zero. In this case,
+    the function estimates the chirp slope of the nominal Tx waveform by
+    assuming an oversampling ratio of 1.2 for NISAR products.
+
+    Parameters
+    ----------
+    raw : nisar.products.readers.Raw
+        Raw parser of L0B product.
+    freq_band : str
+        Frequency band character "A" or "B".
+    txrx_pol : str
+        Transmit-receive polarization such as "HH", "HV", etc.
+    slope_sign : {-1, 1}
+        Sign of the chirp slope. Default is down chirp (-1).
+        This is simply used if the chirp slope or bandwidth is
+        set to zero for some NISAR modes.
+        In this case, the chirp slope is assumed to be
+        `slope_sign * fs / (1.2 * pw)` where `fs` and `pw` are
+        the chirp sampling rate and pulsewidth, respectively.
+
+    Returns
+    -------
+    fs : float
+        Chirp sampling rate in Hz
+    slope : float
+        Chirp slope in Hz/seconds
+    pw : float
+        Chirp pulsewidth in seconds
+
+    """
+    _, fs, slope, pw = raw.getChirpParameters(freq_band, txrx_pol[0])
+    if np.isclose(slope, 0.0):
+        slope = slope_sign * fs / (1.2 * pw)
+    return fs, slope, pw
+
+
+def _adjust_delays_in_place(dset, sample_delays):
+    """
+    Adjust relative sample delays over all RX channels except
+    the very first channel in place.
+
+    Parameters
+    ----------
+    dset : array of complex float
+        3-D array of raw decoded data with shape
+        (RX channels, range lines, range bins) to be modified in place.
+    sample_delays : array of int or None
+        Array-like signed integers representing relative sample delay of
+        RX channels wrt the very first one to be compensated in range
+        direction. The order of channels is ascending.
+        The size of array shall be `RX channels - 1`.
+        If None, no delay adjustment will be applied.
+
+    """
+    if sample_delays is not None:
+        for cc, delay in enumerate(sample_delays, start=1):
+            if delay != 0:
+                dset[cc] = np.roll(dset[cc], shift=delay, axis=-1)
 
 
 if __name__ == '__main__':
