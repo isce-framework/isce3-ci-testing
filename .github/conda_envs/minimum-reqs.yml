@@ -15,10 +15,10 @@ dependencies:
   - gdal>=3.6
   - gmock=1.10
   - gtest=1.10
-  - h5py=3.6
-  - hdf5=1.12.1
+  - h5py
+  - hdf5
   - ninja
-  - numpy=1.20
+  - numpy
   # Needed to resolve against numpy <1.22,
   # see https://github.com/conda-forge/pandas-feedstock/issues/208
   - pandas<2.2
@@ -27,9 +27,9 @@ dependencies:
   # pyre not included in this build
   - pysolid
   - pytest
-  - python=3.9
+  - python
   - ruamel.yaml
   - scipy!=1.10.0
-  - shapely=1.8
+  - shapely
   - snaphu=0.4
   - yamale
