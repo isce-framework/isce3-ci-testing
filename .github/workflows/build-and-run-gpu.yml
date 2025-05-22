@@ -79,11 +79,8 @@ jobs:
           conda env config vars set PYTHONPATH=$PYTHONPATH:$GITHUB_WORKSPACE/install/packages
 
       - name: Install CUDA Toolkit
-        if: runner.os == 'Linux'
-        uses: Jimver/cuda-toolkit@v0.2.23
-        id: cuda-toolkit
-        with:
-          cuda: '12.5.0'
+        run: |
+          micromamba install -c nvidia cuda
 
       # Get cmake command configured with relevant build information
       - name: Configure cmake
